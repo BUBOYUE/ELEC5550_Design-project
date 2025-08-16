@@ -3,14 +3,18 @@
 #include "uart.h"
 
 #define ROLE_SENDER 1   // 板A改为1，板B改为0
-const int UART_NUM = 2; // 使用 Serial2
-const int PIN_RX = 16;  // 按你实际连线改
-const int PIN_TX = 17;  // 按你实际连线改
-const unsigned long BAUD = 115200;
 
-// 帧格式: [0xAA][LEN][PAYLOAD..][CRC_H][CRC_L]
-// 这里的 PAYLOAD 演示为 3字节: dx, dy, btn
-const uint8_t STX = 0xAA;
+
+
+// 简单封装：初始化 UART2
+void uart2_init() {
+  // 对 ESP32 而言，Serial2.begin(波特率, 格式, RX, TX)
+  Serial2.begin(BAUD, SERIAL_8N1, PIN_RX, PIN_TX);
+  // 可选：给一点时间稳态
+  delay(50);
+}
+
+
 
 uint16_t crc16_ccitt_false(const uint8_t* data, size_t len) {
   uint16_t crc = 0xFFFF;

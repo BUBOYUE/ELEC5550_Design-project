@@ -27,12 +27,6 @@ void device_usb_init() {
   g_usb_ready = true; //标记鼠标初始化成功
 }
 
-// ================= UART 初始化 =================
-void uart_init() {
-  delay(10);
-  Serial2.begin(BAUD, SERIAL_8N1, PIN_RX, PIN_TX);//板间通信串口，接线时要 TX ↔ 对方 RX，并且 GND ↔ GND
-}
-
 
 // ================= 主循环转发 =================
 void device_poll_and_forward() {
@@ -43,15 +37,15 @@ void device_poll_and_forward() {
     Serial.printf("TX: dx=%u dy=%u btn=%u\n", dx_u, dy_u, btn_u);
     if (!g_usb_ready) continue;
 
-    // 二补码解释：uint8_t -> int8_t 【？意义不明】
+    // 二补码解释：uint8_t -> int8_t 因为鼠标位移有方向，所以要将无符号换成有符号整数，表示正确的方向。但是这也取决于鼠标发出的信息格式。
     int8_t dx = (int8_t)dx_u;
     int8_t dy = (int8_t)dy_u;
 
-    // // 按钮为绝对掩码（与 Arduino HID 约定一致：bit0 L, bit1 R, bit2 M, ...）
-    // g_mouse.buttons(btn_u);
+    // 按钮为绝对掩码（与 Arduino HID 约定一致：bit0 L, bit1 R, bit2 M, ...）
+    g_mouse.buttons(btn_u);
 
-    // // 没有滚轮字段时置 0
-    // g_mouse.move(dx, dy, /*wheel=*/0, /*hwheel=*/0);
+    // 没有滚轮字段时置 0
+    g_mouse.move(dx, dy, /*wheel=*/0, /*hwheel=*/0);
   }
 
   // 让出时间片，避免看门狗

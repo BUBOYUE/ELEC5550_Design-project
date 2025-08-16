@@ -30,16 +30,5 @@ typedef struct {
 } DataFrame;
 
 
-// UART CRC
-#ifndef UART_CRC_H
-#define UART_CRC_H
-
-void uart_init(void);
-void uart_send_frame(const DataFrame *frame);
-bool uart_receive_frame(DataFrame *frame);
-
-uint16_t calc_crc16(const uint8_t *data, size_t length);
-
-#endif
 
 #endif

@@ -1,23 +1,11 @@
+#include "CRC.h"
+#include <string.h>
 
-#include <Arduino.h>
-#include <string.h>  
-#include "uart.h"
+static constexpr uint8_t MAX_PAYLOAD = 32;
 
-#define ROLE_SENDER 1   // 板A改为1，板B改为0
-
-
-
-// 简单封装：初始化 UART2
-void uart2_init() {
-  // 对 ESP32 而言，Serial2.begin(波特率, 格式, RX, TX)
-  Serial2.begin(BAUD, SERIAL_8N1, PIN_RX, PIN_TX);
-  // 可选：给一点时间稳态
-  delay(50);
-}
-
-
-
-uint16_t crc16_ccitt_false(const uint8_t* data, size_t len) {
+// ===  CRC ===
+uint16_t crc16_ccitt_false(const uint8_t* data, size_t len)
+{
   uint16_t crc = 0xFFFF;
   const uint16_t poly = 0x1021;
   for (size_t i = 0; i < len; i++) {
@@ -30,7 +18,15 @@ uint16_t crc16_ccitt_false(const uint8_t* data, size_t len) {
   return crc;
 }
 
-void sendFrame(uint8_t dx, uint8_t dy, uint8_t btn) {
+// === 初始化 ===
+void UART_begin() {
+  Serial2.begin(BAUD, SERIAL_8N1, PIN_RX, PIN_TX);
+}
+
+// === 发送，名字和打包 ===
+// 帧: [STX][LEN][PAYLOAD..][CRC_H][CRC_L]，PAYLOAD=3字节{dx,dy,btn}
+void sendFrame(uint8_t dx, uint8_t dy, uint8_t btn)
+{
   uint8_t payload[3] = {dx, dy, btn};
   uint8_t len = sizeof(payload);
 
@@ -46,21 +42,23 @@ void sendFrame(uint8_t dx, uint8_t dy, uint8_t btn) {
   Serial2.write(buf, 2 + len + 2);
 }
 
+// === 接收状态机 ===
 bool readFrame(uint8_t& dx, uint8_t& dy, uint8_t& btn) {
-  static enum { WAIT_STX, WAIT_LEN, WAIT_PAYLOAD, WAIT_CRC_H, WAIT_CRC_L } state = WAIT_STX;
+  enum { WAIT_STX, WAIT_LEN, WAIT_PAYLOAD, WAIT_CRC_H, WAIT_CRC_L };
+  static uint8_t state = WAIT_STX;
   static uint8_t len = 0, idx = 0;
-  static uint8_t payload[32];
+  static uint8_t payload[MAX_PAYLOAD];
   static uint8_t crc_h = 0;
 
   while (Serial2.available()) {
-    uint8_t c = Serial2.read();
+    uint8_t c = (uint8_t)Serial2.read();
     switch (state) {
       case WAIT_STX:
         if (c == STX) state = WAIT_LEN;
         break;
       case WAIT_LEN:
         len = c;
-        if (len == 0 || len > sizeof(payload)) { state = WAIT_STX; break; }
+        if (len == 0 || len > MAX_PAYLOAD) { state = WAIT_STX; break; }
         idx = 0;
         state = WAIT_PAYLOAD;
         break;
@@ -78,12 +76,10 @@ bool readFrame(uint8_t& dx, uint8_t& dy, uint8_t& btn) {
         state = WAIT_STX; // 重置状态机
 
         if (crc_rx == crc_calc) {
-          // 解析payload（这里假定3字节：dx,dy,btn）
           if (len >= 3) { dx = payload[0]; dy = payload[1]; btn = payload[2]; }
           else { dx = dy = btn = 0; }
-          return true; // 一帧OK
+          return true;
         }
-        // CRC错误，丢弃本帧
         break;
       }
     }

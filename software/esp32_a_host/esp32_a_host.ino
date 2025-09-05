@@ -258,6 +258,20 @@ static void hid_host_keyboard_report_callback(const uint8_t *const data,
     return;
   }
 
+  // DEBUG: one-line dump of keyboard report
+  printf("[DBG][KB] size=%d hex:", length);
+  for (int i = 0; i < length; ++i) printf(" %02X", data[i]);
+  printf("\r\n");
+  fflush(stdout);
+  
+  // ---- Send raw Boot keyboard snapshot via UART (type=0x02) ----
+  // Payload layout (8 bytes): [0]=modifier, [1]=reserved(0), [2..7]=key[6]
+  uint8_t kb_payload[8];
+  kb_payload[0] = kb_report->modifier.val; // modifiers (Ctrl/Shift/Alt/GUI)
+  kb_payload[1] = 0x00;                    // reserved
+  memcpy(&kb_payload[2], kb_report->key, 6);
+  send_frame(0x02, kb_payload, 8);
+
   static uint8_t prev_keys[HID_KEYBOARD_KEY_MAX] = {0};
   key_event_t key_event;
 

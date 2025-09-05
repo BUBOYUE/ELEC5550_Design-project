@@ -2,11 +2,11 @@
 #include <stdint.h>
 
 
-#define ROLE_SENDER 1   // 1=发端(A)，0=收端(B)
-const int UART_NUM = 2; // 使用 Serial2
-const int PIN_RX = 18;  // 按你实际连线改
-const int PIN_TX = 17;  // 按你实际连线改
-const unsigned long BAUD = 115200;//波特率
+// #define ROLE_SENDER 1   // 1=发端(A)，0=收端(B)
+// const int UART_NUM = 2; // 使用 Serial2
+// const int PIN_RX = 18;  // 按你实际连线改
+// const int PIN_TX = 17;  // 按你实际连线改
+// const unsigned long BAUD = 115200;//波特率
 
 
 // 初始化 USB + HID 鼠标

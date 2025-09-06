@@ -5,6 +5,8 @@
 #include "USBHID.h"
 #include "USBHIDMouse.h"
 #include "USBHIDKeyboard.h"
+#include "tusb.h"   // 直接用 TinyUSB 的底层 API 发送键盘报告
+
 
 // ===== 全局对象：HID 总线 + 设备 =====
 static USBHID             g_hid;            // HID 总线
@@ -36,6 +38,7 @@ void device_poll_and_forward() {
 
   // 把串口里累积的帧尽量吃干净
   while (read_frame(type, payload, len, sizeof(payload))) {
+    
     // --- 鼠标：type = 0x01, payload = [buttons, dx, dy, wheel] (4B)---
       if (type == MSG_MOUSE && len >= 4) {     // 确保 MSG_MOUSE == 0x01
       uint8_t btn = payload[0];              // bit0 L, bit1 R, bit2 M
@@ -48,47 +51,27 @@ void device_poll_and_forward() {
       Serial.printf("mouse btn=%02X dx=%d dy=%d wheel=%d\n", btn, dx, dy, wheel); //调试用，打印滚轮值
     }
 
-    // --- 键盘：payload = [mod, reserved, key1..key6] (6KRO+mod) ---
+    // --- 键盘：payload = [mod, reserved, key1..key6] (Boot 6KRO) ---
     else if (type == MSG_KEYBOARD && len == 8) {
-      const uint8_t mod = payload[0];
-      const uint8_t *keys = &payload[2]; // 6 个按键扫描码
+      const uint8_t mod  = payload[0];
+      const uint8_t *keys = &payload[2];   // 6 个 HID usage ID
 
-      /*
-       * 不同版本的 USBHIDKeyboard 提供的“直接发 8 字节报告”的 API 名字可能不同。
-       * 优先尝试 sendReport(mod, keys[6]) 之类；如果你库里没有该方法，
-       * 就退化为：releaseAll() → 按下所有修饰键和普通键。
-       */
-      #if defined(USBHID_KEYBOARD_HAS_SENDREPORT8)
-        g_keyboard.sendReport(mod, keys);        // 如果你们库支持，优先用一发到位
-      #else
-        // 保险做法：先清空，再逐个“按下”
-        g_keyboard.releaseAll();
+      // 组装 8 字节键盘报告
+      uint8_t report[8];
+      report[0] = mod;
+      report[1] = 0;
+      memcpy(&report[2], keys, 6);
 
-        // 修饰键（bit0..bit7）：LCTL LSHIFT LALT LGUI RCTL RSHIFT RALT RGUI
-        auto press_modifier = [&](uint8_t bitmask){
-          switch (bitmask) {
-            case 0x01: g_keyboard.press(KEY_LEFT_CTRL);  break;
-            case 0x02: g_keyboard.press(KEY_LEFT_SHIFT); break;
-            case 0x04: g_keyboard.press(KEY_LEFT_ALT);   break;
-            case 0x08: g_keyboard.press(KEY_LEFT_GUI);   break;
-            case 0x10: g_keyboard.press(KEY_RIGHT_CTRL); break;
-            case 0x20: g_keyboard.press(KEY_RIGHT_SHIFT);break;
-            case 0x40: g_keyboard.press(KEY_RIGHT_ALT);  break;
-            case 0x80: g_keyboard.press(KEY_RIGHT_GUI);  break;
-          }
-        };
-        for (uint8_t b = 0; b < 8; ++b) {
-          if (mod & (1u << b)) press_modifier(1u << b);
-        }
+      // ★ 关键：用“键盘的 Report-ID”发送，而不是 0（Boot）
+      //Report ID: Mouse=2,Keyboard=1
+      const uint8_t REPORT_ID_KEYBOARD = 1;
 
-        // 普通 6 键（0 表示“无按键”）
-        for (int i = 0; i < 6; ++i) {
-          if (keys[i] != 0) g_keyboard.press(keys[i]);
-        }
-        // 说明：
-        // 1) 多数实现中 press()/releaseAll() 会立即发送报告；
-        // 2) 若你们库需要显式 flush，可在这里调用 g_keyboard.sendReport(...) 或类似 API。
-      #endif
+      // 发送：带 Report-ID 的通用接口
+      tud_hid_report(REPORT_ID_KEYBOARD, report, sizeof(report));
+
+
+      //调试（可留可删）
+      Serial.printf("kbd mod=%02X keys=%02X %02X %02X %02X %02X %02X\n", mod, keys[0],keys[1],keys[2],keys[3],keys[4],keys[5]);
     }
 
     // 可选调试

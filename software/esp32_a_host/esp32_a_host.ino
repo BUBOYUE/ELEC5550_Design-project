@@ -331,6 +331,11 @@ static void hid_host_keyboard_report_callback(const uint8_t *const data,
 
 static void hid_host_mouse_report_callback(const uint8_t *const data,
                                            const int length){
+  // DEBUG: dump raw mouse report as signed decimal (int8)
+  printf("[DBG][MOUSE] size=%d s8:", length);
+  for (int i = 0; i < length; ++i) printf(" %4d", (int)((int8_t)data[i]));
+  printf("\r\n");
+  fflush(stdout);
   // 自适配 Boot/Report 常见布局；见上三种格式
   const uint8_t *p = data;
   int remaining = length;
@@ -345,7 +350,25 @@ static void hid_host_mouse_report_callback(const uint8_t *const data,
 
   uint8_t buttons = p[0];
   int8_t dx = (remaining >= 2) ? (int8_t)p[1] : 0;
-  int8_t dy = (remaining >= 3) ? (int8_t)p[2] : 0;
+  // ----- Robust Y: treat p[3] as signed high byte, then scale by 8 with signed rounding -----
+  int16_t dy16 = 0;
+  if (remaining >= 4) {
+    // Little-endian 16-bit: low=p[2], high=p[3] (high is signed)
+    int8_t dy_hi = (int8_t)p[3];
+    uint8_t dy_lo = (remaining >= 3) ? p[2] : 0;
+    dy16 = (int16_t)(((int16_t)dy_hi << 8) | (uint16_t)dy_lo);
+  } else {
+    // Fallback to 8-bit
+    dy16 = (int16_t)((remaining >= 3) ? (int8_t)p[2] : 0);
+  }
+  // Signed rounding division by 8 to match desired sensitivity
+  int dy_scaled = (dy16 >= 0) ? (((int)dy16 + 4) / 8) : (((int)dy16 - 4) / 8);
+  if (dy_scaled > 127) dy_scaled = 127;
+  if (dy_scaled < -128) dy_scaled = -128;
+  int8_t dy = (int8_t)dy_scaled;
+  // Debug print for combined Y values
+  printf("[DBG][MOUSE] dy_lo=0x%02X dy_hi=0x%02X dy16=%d dy=%d\r\n", (remaining>=3?p[2]:0), (remaining>=4?p[3]:0), (int)dy16, (int)dy);
+  fflush(stdout);
   int8_t wheel = 0;
   int8_t wheel_h = 0; // optional horizontal wheel
 

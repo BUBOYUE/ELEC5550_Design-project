@@ -641,7 +641,7 @@ void setup() {
   Serial.begin(115200);      // 调试口到电脑
   delay(200);
   uart2_init();              // 串口2：与对端板/下游链路通信
-  Serial.println("ESP32-A: PC->UART(raw type+payload) -> send_frame()");
+  Serial.println("ESP32-A: Device -> USB HID test");
   app_main();
 }
 

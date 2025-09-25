@@ -11,16 +11,19 @@ static const uint8_t STX = 0xAA;
 enum MsgType : uint8_t {
   MSG_MOUSE    = 0x01, // payload: 3B -> dx, dy, btn
   MSG_KEYBOARD = 0x02, // payload: 8B -> modifier, reserved, key1..key6
-  // 预留：
-  MSG_SET_MODE = 0x20, // 可选：若将来需要
-  MSG_ACK      = 0x7E,
-  MSG_NAK      = 0x7F,
+  U_A2B_INIT  = 0x03, // U stick initilize info (block size, block count)
+  U_B2A_WRITE, // PC write requirement
+  U_B2A_READ, // PC Read requirement
+  U_A2B_READCONTENT, // U stick send required content to PC
+  U_B2A_STARTSTOP, // PC require U stick plug in/out
+  U_A2B_REMOVED, // U stick Remove
+  CMD_REINIT  = 0xff, // Reinitial command
 };
 
 // ===== 串口参数（与你现有工程保持一致）=====
 static const int PIN_RX = 18;
 static const int PIN_TX = 17;
-static const unsigned long BAUD = 115200;
+static const unsigned long BAUD = 460800;
 
 // ===== API =====
 void uart2_init();

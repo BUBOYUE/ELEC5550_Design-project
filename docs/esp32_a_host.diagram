@@ -1,0 +1,102 @@
+----------------------------------------
+Classdiagram for esp32 a host
+classDiagram
+direction LR
+
+note for ESP32_A_Host "main function"
+note for UART "Custom library "
+note for USB "Official library (ESP-IDF provided)"
+class ESP32_A_Host {
+    MouseEvent
+    KeyboardEvent
+    DataFrame
+  +setup()
+  +loop()
+  +Serial.begin()
+}
+
+class UART {
+    BAUD, PIN_TX, PIN_RX
+  +uart2_init()
+  +sendFrame(dx,dy,btn)
+}
+class USB {
+    event_queue: QueueHandle_t
+  + install()
+  + uninstall()
+  + handleEvents()
+  + deviceOpen()
+  + deviceStart()
+  + deviceClose()
+
+}
+
+
+    ESP32_A_Host --> UART : uart.h
+    ESP32_A_Host --> USB  : usb_host.h
+
+    style UART fill::#f66,stroke-width:2px,stroke-dasharray: 5 5
+    style USB fill::#f66,stroke-width:2px,stroke-dasharray: 5 5
+   
+
+-----------------------------------------------------
+flowchart!! Version for system test and quick demo
+flowchart LR
+    subgraph setup
+    A[**Configration**] --> B[**UART0/2 init**]
+    end
+    subgraph loop
+    B --> C[**Wait data from PC**]
+    C --> D{bytes = 3?}
+    D -- No --> C
+    D -- Yes --> E[**CRC package**]
+    E --> F[**sendFrame**]
+    F --> G[**Report to PC**]
+    G --> C
+    end
+
+------------------------------------------------------
+flowchart!! Version for USB Host
+flowchart LR
+classDef inprogress fill:#f96,color:#fff
+  subgraph setup & configuration
+  A[**usb_host init**] --> B[**register tasks/callbacks**]
+  end
+  subgraph loop
+  B --> C[**wait for device**]
+  C --> D[**identify HID device**]
+  D --> E[**handshake/start**]
+  E:::inprogress --> F[**communicate reports/sendFrame**]
+  F:::inprogress --device removed --> C
+  end
+
+
+
+
+
+
+------------github---------
+gitGraph
+  commit id:"Initialization"
+  commit id:"UART basic function"
+  commit id:"Mouse function"
+
+  %% Branch: host power issue
+  branch power-fix
+  checkout power-fix
+  commit id:"Host power issue: debugging"
+  commit id:"Power fix & validation"
+  checkout main
+  merge power-fix id:"Merge: power fix"
+
+  commit id:"Keyboard function"
+  commit id:"HID full function"
+
+  %% Branch: USB disk (future work)
+  branch msc
+  checkout msc
+  commit id:"USB disk branch: initial setup"
+  commit id:"USB disk read/write test"type:HIGHLIGHT
+  
+    checkout main
+   merge msc id:"Merge: USB disk function"

@@ -2,9 +2,13 @@
 #include <string.h>
 #include "uart.h"
 
+// ===== 引入 Reed–Solomon 头文件（mersinvald/rs.hpp）=====
+#include "rs.hpp"
+// RS(255,239) => 冗余16B，可纠8字节错误
+using FEC_RS = RS::ReedSolomon<239, 16>;
+
 // ===== UART2 初始化 =====
 void uart2_init() {
-  // ESP32 的 Serial2: (baud, config, RX, TX)
   Serial2.begin(BAUD, SERIAL_8N1, PIN_RX, PIN_TX);
   delay(50);
 }
@@ -15,100 +19,114 @@ uint16_t crc16_ccitt_false(const uint8_t* data, size_t len) {
   const uint16_t poly = 0x1021;
   for (size_t i = 0; i < len; i++) {
     crc ^= (uint16_t)data[i] << 8;
-    for (uint8_t b = 0; b < 8; b++) {
+    for (int b = 0; b < 8; b++) {
       if (crc & 0x8000) crc = (crc << 1) ^ poly;
-      else              crc <<= 1;
+      else              crc = (crc << 1);
     }
   }
   return crc;
 }
 
-// 计算覆盖 TYPE|LEN|PAYLOAD 的 CRC，便于调用
-static uint16_t crc_type_len_payload(uint8_t type, uint8_t len, const uint8_t* payload) {
-  uint8_t tmp[2 + 255]; // LEN 最大255
-  tmp[0] = type;
-  tmp[1] = len;
-  if (len && payload) memcpy(&tmp[2], payload, len);
-  return crc16_ccitt_false(tmp, 2 + len);
+// ===== 内部：是否对某类型启用FEC =====
+static inline bool fec_enabled_for(uint8_t type) {
+  return (type == MSG_FEC_DATA);
 }
 
-// ===== 通用帧发送 =====
+// ===== 低层：裸帧发送 =====
 // 帧格式: [STX][TYPE][LEN][PAYLOAD..][CRC_H][CRC_L]
-bool send_frame(uint8_t type, const uint8_t* payload, uint8_t len) {
-  const size_t total = 1 + 1 + 1 + len + 2;
-  uint8_t buf[1 + 1 + 1 + 255 + 2]; // STX + TYPE + LEN + payload + CRC
-  buf[0] = STX;
-  buf[1] = type;
-  buf[2] = len;
-  if (len && payload) memcpy(&buf[3], payload, len);
+// 外层CRC覆盖 TYPE|LEN|PAYLOAD
+bool send_frame_nofec(uint8_t type, const uint8_t* payload, uint8_t len) {
+  // 发送缓冲：STX(1)+TYPE(1)+LEN(1)+PAYLOAD(≤255)+CRC(2)
+  static uint8_t buf[3 + 255 + 2];
+  size_t off = 0;
+  buf[off++] = STX;
+  buf[off++] = type;
+  buf[off++] = len;
+  if (len && payload) {
+    memcpy(&buf[off], payload, len);
+    off += len;
+  }
+  // 计算外层CRC（TYPE|LEN|PAYLOAD）
+  uint16_t crc2 = crc16_ccitt_false(&buf[1], 2 + len);
+  buf[off++] = (uint8_t)(crc2 >> 8);
+  buf[off++] = (uint8_t)(crc2 & 0xFF);
 
-  uint16_t crc = crc_type_len_payload(type, len, payload);
-  buf[3 + len + 0] = (crc >> 8) & 0xFF;
-  buf[3 + len + 1] = (crc >> 0) & 0xFF;
-
-  size_t written = Serial2.write(buf, total);
-  return (written == total);
+  size_t wrote = Serial2.write(buf, off);
+  return (wrote == off);
 }
 
-// ===== 通用帧接收（状态机）=====
-bool read_frame(uint8_t& type, uint8_t* payload, uint8_t& len, size_t max_len) {
-  enum State { WAIT_STX, WAIT_TYPE, WAIT_LEN, WAIT_PAYLOAD, WAIT_CRC_H, WAIT_CRC_L };
-  static State state = WAIT_STX;
-  static uint8_t s_type = 0;
-  static uint8_t s_len = 0;
-  static uint8_t s_idx = 0;
-  static uint8_t s_payload[255];
-  static uint8_t s_crc_h = 0;
+// ===== 低层：裸帧接收（非阻塞状态机；循环调用直到返回true）=====
+bool read_frame_nofec(uint8_t& type, uint8_t* payload, uint8_t& len, size_t max_len) {
+  enum { WAIT_STX, WAIT_TYPE, WAIT_LEN, READ_PAYLOAD, READ_CRC_H, READ_CRC_L };
+  static uint8_t  state = WAIT_STX;
+  static uint8_t  t = 0;
+  static uint8_t  L = 0;
+  static uint8_t  pbuf[255];
+  static uint8_t  pi = 0;
+  static uint16_t crc_recv = 0;
+  static uint32_t last_ms = 0;
 
-  while (Serial2.available()) {
-    uint8_t c = Serial2.read();
+  auto reset = [&](){
+    state = WAIT_STX; t = 0; L = 0; pi = 0; crc_recv = 0; last_ms = millis();
+  };
+
+  if (last_ms == 0) last_ms = millis();
+  // 超时复位
+  if (millis() - last_ms > 50) {
+    reset();
+  }
+
+  while (Serial2.available() > 0) {
+    uint8_t b = (uint8_t)Serial2.read();
+    last_ms = millis();
 
     switch (state) {
       case WAIT_STX:
-        if (c == STX) state = WAIT_TYPE;
+        if (b == STX) { state = WAIT_TYPE; }
         break;
 
       case WAIT_TYPE:
-        s_type = c;
+        t = b;
         state = WAIT_LEN;
         break;
 
       case WAIT_LEN:
-        s_len = c;
-        if (s_len == 0) { // 允许0长度有效载荷
-          state = WAIT_CRC_H;
-        } else if (s_len > sizeof(s_payload)) {
-          state = WAIT_STX; // 非法长度，丢弃
-        } else {
-          s_idx = 0;
-          state = WAIT_PAYLOAD;
-        }
+        L = b;
+        if (L == 0)  { state = READ_CRC_H; }
+        else         { state = READ_PAYLOAD; pi = 0; }
         break;
 
-      case WAIT_PAYLOAD:
-        s_payload[s_idx++] = c;
-        if (s_idx >= s_len) state = WAIT_CRC_H;
+      case READ_PAYLOAD:
+        pbuf[pi++] = b;
+        if (pi >= L) state = READ_CRC_H;
         break;
 
-      case WAIT_CRC_H:
-        s_crc_h = c;
-        state = WAIT_CRC_L;
+      case READ_CRC_H:
+        crc_recv = ((uint16_t)b) << 8;
+        state = READ_CRC_L;
         break;
 
-      case WAIT_CRC_L: {
-        uint16_t crc_rx = ((uint16_t)s_crc_h << 8) | c;
-        uint16_t crc_calc = crc_type_len_payload(s_type, s_len, s_len ? s_payload : nullptr);
-
-        state = WAIT_STX; // 重置状态机以继续接收下一帧
-
-        if (crc_rx == crc_calc) {
+      case READ_CRC_L: {
+        crc_recv |= b;
+        // 校验 CRC（TYPE|LEN|PAYLOAD）
+        static uint8_t tmp[2 + 255];
+        tmp[0] = t; tmp[1] = L;
+        if (L) memcpy(&tmp[2], pbuf, L);
+        uint16_t crc_calc = crc16_ccitt_false(tmp, 2 + L);
+        if (crc_calc == crc_recv) {
           // 输出
-          type = s_type;
-          len  = s_len;
-          if (payload && max_len >= s_len && s_len) memcpy(payload, s_payload, s_len);
+          type = t;
+          len  = L;
+          if (L) {
+            if (max_len < L) { reset(); return false; }
+            memcpy(payload, pbuf, L);
+          }
+          reset();
           return true;
+        } else {
+          // CRC 错误，丢弃
+          reset();
         }
-        // CRC 错误丢弃
         break;
       }
     }
@@ -116,17 +134,90 @@ bool read_frame(uint8_t& type, uint8_t* payload, uint8_t& len, size_t max_len) {
   return false;
 }
 
-// ===== 便捷：鼠标/键盘 =====
-bool sendMouseReport(uint8_t dx, uint8_t dy, uint8_t btn) {
-  uint8_t p[3] = { dx, dy, btn }; // 与你们现有顺序一致
-  return send_frame(MSG_MOUSE, p, 3);
+// ===== 顶层：统一入口（按类型自动选择是否启用FEC）=====
+
+// 发送：FEC 类型 -> 编码后以255B发送；非FEC类型 -> 裸帧原样发送
+bool send_frame(uint8_t type, const uint8_t* payload, uint8_t len) {
+  if (!fec_enabled_for(type)) {
+    return send_frame_nofec(type, payload, len);
+  }
+
+  // FEC 帧：把 [raw_len(1B) | raw_data | innerCRC(2B)] 填充到 239B，再RS编码
+  if (len > 236) return false; // 留1B长度+2B CRC
+  uint8_t kbuf[239];
+  memset(kbuf, 0, sizeof(kbuf));
+  kbuf[0] = len;                           // 原始长度
+  if (len) memcpy(&kbuf[1], payload, len);
+  uint16_t inner = crc16_ccitt_false(&kbuf[1], len);
+  kbuf[1 + len] = (uint8_t)(inner >> 8);
+  kbuf[2 + len] = (uint8_t)(inner & 0xFF);
+  // 其余填充为0
+
+  // 组装码字：src=239B消息，dst=255B码字
+  uint8_t code[239 + 16];
+  FEC_RS rs;
+  rs.Encode(kbuf, code); // ✅ 正确用法：两个参数
+
+  // 外层一帧发送（LEN=255）
+  return send_frame_nofec(type, code, (uint8_t)(239 + 16));
 }
 
+// 接收：先按裸帧取回；若FEC类型 -> 解码校验并还原原始数据
+bool read_frame(uint8_t& type, uint8_t* payload, uint8_t& len, size_t max_len) {
+  uint8_t t, L;
+  uint8_t buf[255];
+  if (!read_frame_nofec(t, buf, L, sizeof(buf))) return false;
+
+  if (!fec_enabled_for(t)) {
+    // 非FEC类型，直接透传
+    type = t;
+    len  = L;
+    if (L) {
+      if (max_len < L) return false;
+      memcpy(payload, buf, L);
+    }
+    return true;
+  }
+
+  // FEC类型
+  if (L != 239 + 16) {
+    // 长度不对，丢弃
+    return false;
+  }
+
+  // 解码：src=255B码字，dst=239B消息
+  uint8_t kbuf[239];
+  FEC_RS rs;
+  int dec_ret = rs.Decode(buf, kbuf, nullptr, 0); // ✅ 正确用法：四参（后两参可缺省）
+  if (dec_ret < 0) {
+    // 解码失败
+    return false;
+  }
+
+  // 解析出 [raw_len | raw_data | innerCRC]
+  uint8_t raw_len = kbuf[0];
+  if (raw_len > 236) return false;
+  if ((size_t)raw_len > max_len) return false;
+
+  uint16_t inner_got  = ((uint16_t)kbuf[1 + raw_len] << 8) | kbuf[2 + raw_len];
+  uint16_t inner_calc = crc16_ccitt_false(&kbuf[1], raw_len);
+  if (inner_got != inner_calc) {
+    return false; // 防止误改正
+  }
+
+  if (raw_len) memcpy(payload, &kbuf[1], raw_len);
+  type = t;
+  len  = raw_len;
+  return true;
+}
+
+// ===== 便捷包装：鼠标/键盘 =====
+bool sendMouseReport(uint8_t dx, uint8_t dy, uint8_t btn) {
+  uint8_t p[3] = { dx, dy, btn };
+  return send_frame(MSG_MOUSE, p, 3);
+}
 bool sendKeyboardReport(uint8_t modifier, const uint8_t keys[6]) {
-  uint8_t p[8];
-  p[0] = modifier;
-  p[1] = 0x00;        // reserved
-  memcpy(&p[2], keys, 6); // key1..key6
+  uint8_t p[8] = { modifier, 0, keys[0], keys[1], keys[2], keys[3], keys[4], keys[5] };
   return send_frame(MSG_KEYBOARD, p, 8);
 }
 
@@ -143,7 +234,6 @@ bool readKeyboard(uint8_t& modifier, uint8_t keys_out[6]) {
   if (!read_frame(type, p, len, sizeof(p))) return false;
   if (type != MSG_KEYBOARD || len != 8) return false;
   modifier = p[0];
-  // p[1] 是 reserved
   memcpy(keys_out, &p[2], 6);
   return true;
 }

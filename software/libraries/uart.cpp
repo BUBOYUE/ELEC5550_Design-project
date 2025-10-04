@@ -2,6 +2,12 @@
 #include <string.h>
 #include "uart.h"
 
+// ===== 简单错误打印开关（只在丢帧时打一行）=====
+#ifndef UART_PRINT_ERRORS
+#define UART_PRINT_ERRORS 1   // 改成 0 可关闭所有错误打印
+#endif
+#define UART_ERR(fmt, ...) do { if (UART_PRINT_ERRORS) Serial.printf("[UART][DROP] " fmt, ##__VA_ARGS__); } while(0)
+
 // ===== 引入 Reed–Solomon 头文件（mersinvald/rs.hpp）=====
 #include "rs.hpp"
 // RS(255,239) => 冗余16B，可纠8字节错误
@@ -27,9 +33,15 @@ uint16_t crc16_ccitt_false(const uint8_t* data, size_t len) {
   return crc;
 }
 
-// ===== 内部：是否对某类型启用FEC =====
+// ——开关：除了键鼠都走FEC——
 static inline bool fec_enabled_for(uint8_t type) {
-  return (type == MSG_FEC_DATA);
+  switch (type) {
+    case MSG_MOUSE:
+    case MSG_KEYBOARD:
+      return false;      // 键鼠不走FEC（低时延小包）
+    default:
+      return true;       // 其他一律走FEC（控制/数据/自定义类型等）
+  }
 }
 
 // ===== 低层：裸帧发送 =====
@@ -118,13 +130,19 @@ bool read_frame_nofec(uint8_t& type, uint8_t* payload, uint8_t& len, size_t max_
           type = t;
           len  = L;
           if (L) {
-            if (max_len < L) { reset(); return false; }
+            if (max_len < L) {
+              // 上层给的缓存不够，丢弃并打印
+              UART_ERR("payload overflow (nofec): type=0x%02X len=%u max=%u\n", t, L, (unsigned)max_len);
+              reset();
+              return false;
+            }
             memcpy(payload, pbuf, L);
           }
           reset();
           return true;
         } else {
-          // CRC 错误，丢弃
+          // CRC 错，丢弃并打印
+          UART_ERR("CRC fail: type=0x%02X len=%u\n", t, L);
           reset();
         }
         break;
@@ -156,7 +174,7 @@ bool send_frame(uint8_t type, const uint8_t* payload, uint8_t len) {
   // 组装码字：src=239B消息，dst=255B码字
   uint8_t code[239 + 16];
   FEC_RS rs;
-  rs.Encode(kbuf, code); // ✅ 正确用法：两个参数
+  rs.Encode(kbuf, code); // 正确用法：两个参数
 
   // 外层一帧发送（LEN=255）
   return send_frame_nofec(type, code, (uint8_t)(239 + 16));
@@ -173,7 +191,10 @@ bool read_frame(uint8_t& type, uint8_t* payload, uint8_t& len, size_t max_len) {
     type = t;
     len  = L;
     if (L) {
-      if (max_len < L) return false;
+      if (max_len < L) {
+        UART_ERR("payload overflow (nofec->upper): type=0x%02X len=%u max=%u\n", t, L, (unsigned)max_len);
+        return false;
+      }
       memcpy(payload, buf, L);
     }
     return true;
@@ -181,33 +202,41 @@ bool read_frame(uint8_t& type, uint8_t* payload, uint8_t& len, size_t max_len) {
 
   // FEC类型
   if (L != 239 + 16) {
-    // 长度不对，丢弃
+    UART_ERR("FEC len bad: type=0x%02X len=%u (expect 255)\n", t, L);
     return false;
   }
 
   // 解码：src=255B码字，dst=239B消息
   uint8_t kbuf[239];
   FEC_RS rs;
-  int dec_ret = rs.Decode(buf, kbuf, nullptr, 0); // ✅ 正确用法：四参（后两参可缺省）
+  int dec_ret = rs.Decode(buf, kbuf, nullptr, 0); // >=0 成功；<0 失败
   if (dec_ret < 0) {
-    // 解码失败
+    UART_ERR("FEC decode fail: type=0x%02X\n", t);
     return false;
   }
 
   // 解析出 [raw_len | raw_data | innerCRC]
   uint8_t raw_len = kbuf[0];
-  if (raw_len > 236) return false;
-  if ((size_t)raw_len > max_len) return false;
+  if (raw_len > 236) {
+    UART_ERR("FEC raw_len illegal: %u\n", raw_len);
+    return false;
+  }
+  if ((size_t)raw_len > max_len) {
+    UART_ERR("payload overflow (fec->upper): raw_len=%u max=%u\n", raw_len, (unsigned)max_len);
+    return false;
+  }
 
   uint16_t inner_got  = ((uint16_t)kbuf[1 + raw_len] << 8) | kbuf[2 + raw_len];
   uint16_t inner_calc = crc16_ccitt_false(&kbuf[1], raw_len);
   if (inner_got != inner_calc) {
-    return false; // 防止误改正
+    UART_ERR("FEC inner CRC fail: raw_len=%u\n", raw_len);
+    return false;
   }
 
   if (raw_len) memcpy(payload, &kbuf[1], raw_len);
   type = t;
   len  = raw_len;
+  // 成功时不打印，保持安静
   return true;
 }
 

@@ -6,7 +6,7 @@
 
 // ====== 默认硬件参数（如外部已有定义则不覆盖）======
 #ifndef BAUD
-#define BAUD 115200
+#define BAUD 230400
 #endif
 #ifndef PIN_RX
 #define PIN_RX 18
@@ -20,15 +20,17 @@ static const uint8_t STX = 0xAA;
 
 // ===== 帧类型（可扩展）=====
 enum MsgType : uint8_t {
-  MSG_MOUSE     = 0x01, // payload: 3B -> dx, dy, btn
-  MSG_KEYBOARD  = 0x02, // payload: 8B -> modifier, reserved, key1..key6
-  // 预留/控制：
-  MSG_SET_MODE  = 0x20,
-  // FEC 载荷（开启FEC的类型）
-  MSG_FEC_DATA  = 0x30,
-  // ACK/NAK（如未来要加ARQ可用）
-  MSG_ACK       = 0x7E,
-  MSG_NAK       = 0x7F
+  MSG_MOUSE    = 0x01, // payload: 3B -> dx, dy, btn
+  MSG_KEYBOARD = 0x02, // payload: 8B -> modifier, reserved, key1..key6
+  U_A2B_INIT  = 0x03, // U stick initilize info (block size, block count)
+  U_B2A_WRITE, // PC write requirement
+  U_A2B_WRITEDONE, // U stick send written done to PC
+  U_B2A_READ, // PC Read requirement
+  U_A2B_READCONTENT, // U stick send required content to PC
+  U_B2A_STARTSTOP, // PC require U stick plug in/out
+  U_A2B_REMOVED, // U stick Remove
+  MSG_FEC_DATA, // FEC 载荷（开启FEC的类型）
+  CMD_REINIT  = 0xff, // Reinitial command
 };
 
 // ===== 对外 API =====

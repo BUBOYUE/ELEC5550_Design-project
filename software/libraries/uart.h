@@ -6,13 +6,13 @@
 
 // ====== 默认硬件参数（如外部已有定义则不覆盖）======
 #ifndef BAUD
-#define BAUD 230400
+#define BAUD 460800
 #endif
 #ifndef PIN_RX
-#define PIN_RX 18
+#define PIN_RX 16
 #endif
 #ifndef PIN_TX
-#define PIN_TX 17
+#define PIN_TX 18
 #endif
 
 // ===== 帧头常量 =====
@@ -29,6 +29,7 @@ enum MsgType : uint8_t {
   U_A2B_READCONTENT, // U stick send required content to PC
   U_B2A_STARTSTOP, // PC require U stick plug in/out
   U_A2B_REMOVED, // U stick Remove
+  U_EMPTY, // All zero
   MSG_FEC_DATA, // FEC 载荷（开启FEC的类型）
   CMD_REINIT  = 0xff, // Reinitial command
 };

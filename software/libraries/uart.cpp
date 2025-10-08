@@ -154,13 +154,13 @@ bool read_frame_nofec(uint8_t& type, uint8_t* payload, uint8_t& len, size_t max_
 
 // ===== 顶层：统一入口（按类型自动选择是否启用FEC）=====
 
-// 发送：FEC 类型 -> 编码后以255B发送；非FEC类型 -> 裸帧原样发送
+// 发送：FEC 类型 -> 短化 RS 变长上线；非FEC类型 -> 裸帧原样发送
 bool send_frame(uint8_t type, const uint8_t* payload, uint8_t len) {
   if (!fec_enabled_for(type)) {
     return send_frame_nofec(type, payload, len);
   }
 
-  // FEC 帧：把 [raw_len(1B) | raw_data | innerCRC(2B)] 填充到 239B，再RS编码
+  // FEC 消息：[raw_len(1B) | raw_data | innerCRC(2B)] 放前部；剩余为 0
   if (len > 236) return false; // 留1B长度+2B CRC
   uint8_t kbuf[239];
   memset(kbuf, 0, sizeof(kbuf));
@@ -169,18 +169,24 @@ bool send_frame(uint8_t type, const uint8_t* payload, uint8_t len) {
   uint16_t inner = crc16_ccitt_false(&kbuf[1], len);
   kbuf[1 + len] = (uint8_t)(inner >> 8);
   kbuf[2 + len] = (uint8_t)(inner & 0xFF);
-  // 其余填充为0
+  // 其余保持为 0（可短化）
 
-  // 组装码字：src=239B消息，dst=255B码字
-  uint8_t code[239 + 16];
+  // 先得到完整 255B 码字
+  uint8_t code_full[239 + 16];
   FEC_RS rs;
-  rs.Encode(kbuf, code); // 正确用法：两个参数
+  rs.Encode(kbuf, code_full);
 
-  // 外层一帧发送（LEN=255）
-  return send_frame_nofec(type, code, (uint8_t)(239 + 16));
+  // ——短化发送：只发“前 k' 个消息字节 + 16B 冗余”，去掉尾部全 0 的消息字节——
+  const uint16_t kprime   = (uint16_t)(1 + len + 2);  // 有效消息字节
+  const uint16_t wire_len = (uint16_t)(kprime + 16);  // 上线长度（变长：19..255）
+  uint8_t wire[239 + 16];
+  memcpy(wire,        code_full,        kprime);      // 消息有效部分
+  memcpy(wire+kprime, code_full + 239,  16);          // 末尾 16B 冗余
+
+  return send_frame_nofec(type, wire, (uint8_t)wire_len);
 }
 
-// 接收：先按裸帧取回；若FEC类型 -> 解码校验并还原原始数据
+// 接收：先按裸帧取回；若FEC类型 -> 按 LEN 重建 255B 码字再解码
 bool read_frame(uint8_t& type, uint8_t* payload, uint8_t& len, size_t max_len) {
   uint8_t t, L;
   uint8_t buf[255];
@@ -200,16 +206,28 @@ bool read_frame(uint8_t& type, uint8_t* payload, uint8_t& len, size_t max_len) {
     return true;
   }
 
-  // FEC类型
-  if (L != 239 + 16) {
-    UART_ERR("FEC len bad: type=0x%02X len=%u (expect 255)\n", t, L);
+  // FEC类型：支持“变长短化”——允许 19..255
+  if (L < (1 + 2 + 16) || L > (239 + 16)) {
+    UART_ERR("FEC len out of range: type=0x%02X len=%u (expect 19..255)\n", t, L);
     return false;
   }
 
-  // 解码：src=255B码字，dst=239B消息
+  const uint16_t kprime = (uint16_t)(L - 16); // 本帧携带的消息有效字节
+  // 重建完整 255B 码字：[239B 消息 | 16B 冗余]
+  uint8_t code_full[239 + 16];
+  if (kprime < 239) {
+    memcpy(code_full,         buf,         kprime);         // 有效消息
+    memset(code_full+kprime,  0,           239 - kprime);   // 省略部分补 0
+    memcpy(code_full + 239,   buf + kprime, 16);            // 16B 冗余
+  } else {
+    // 满长 255
+    memcpy(code_full, buf, 239 + 16);
+  }
+
+  // RS 解码：255 -> 239
   uint8_t kbuf[239];
   FEC_RS rs;
-  int dec_ret = rs.Decode(buf, kbuf, nullptr, 0); // >=0 成功；<0 失败
+  int dec_ret = rs.Decode(code_full, kbuf, nullptr, 0); // >=0 成功；<0 失败
   if (dec_ret < 0) {
     UART_ERR("FEC decode fail: type=0x%02X\n", t);
     return false;

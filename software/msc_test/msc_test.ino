@@ -27,7 +27,8 @@
 #include "driver/gpio.h"
 
 static const char *TAG = "example";
-#define MNT_PATH         "/usb"     // Path in the Virtual File System, where the USB flash drive is going to be mounted
+//#define MNT_PATH         "/usb"     // Path in the Virtual File System, where the USB flash drive is going to be mounted
+#define MNT_PATH         "/usb"
 #define APP_QUIT_PIN     GPIO_NUM_0 // BOOT button on most boards
 #define BUFFER_SIZE      4096       // The read/write performance can be improved with larger buffer for the cost of RAM, 4kB is enough for most usecases
 
@@ -38,7 +39,7 @@ static bool dev_present = false;
 
 static uint32_t g_sector_size = 512;                 // 从设备信息更新
 static msc_host_device_handle_t g_msc_dev = NULL;    // 当前 MSC 设备句柄
-static const uint8_t CHUNK_DATA_MAX = 240;           // 单帧分片最大数据长度（<=255-头部）
+static const uint8_t CHUNK_DATA_MAX = 224;           // 单帧分片最大数据长度（从240改为224）
 
 /**
  * @brief Application Queue and its messages ID
@@ -167,6 +168,10 @@ static void print_device_info(msc_host_device_info_t *info)
     // Example (little-endian):
     //   sector_size  = payload[0] | (payload[1]<<8) | (payload[2]<<16) | (payload[3]<<24);
     //   sector_count = payload[4] | (payload[5]<<8) | (payload[6]<<16) | (payload[7]<<24);
+
+    // 添加打印消息
+    Serial.printf("[UART] INIT packet sent: sector_size=%u, sector_count=%u\n", 
+                  info->sector_size, info->sector_count);
 
     // Send initialization info upstream
     send_frame(U_A2B_INIT, (const uint8_t *)&init_info, sizeof(init_info));
@@ -310,17 +315,17 @@ static void usb_task(void *args)
 static void send_readcontent_frame(uint32_t lba, uint32_t offset, uint32_t data_len,
                                    const uint8_t* data)
 {
-    // 按240字节分片发送数据
+    // 按224字节分片发送数据（从240改为224）
     uint32_t sent = 0;
     while (sent < data_len) {
-        uint32_t chunk_size = (data_len - sent > 240) ? 240 : (data_len - sent);
+        uint32_t chunk_size = (data_len - sent > 224) ? 224 : (data_len - sent); // 240改为224
         
         // 计算当前chunk对应的实际LBA和扇区内偏移
         uint32_t current_absolute_offset = offset + sent;
         uint32_t current_lba = lba + (current_absolute_offset / g_sector_size);
         uint32_t current_offset_in_sector = current_absolute_offset % g_sector_size;
         
-        uint8_t buf[4 + 4 + 4 + 240]; // lba(4) + offset(4) + data_length(4) + data(最大240字节)
+        uint8_t buf[4 + 4 + 4 + 224]; // lba(4) + offset(4) + data_length(4) + data(最大224字节，从240改为224)
         size_t p = 0;
         
         // current_lba (LE)
@@ -345,31 +350,37 @@ static void send_readcontent_frame(uint32_t lba, uint32_t offset, uint32_t data_
         memcpy(&buf[p], data + sent, chunk_size);
         p += chunk_size;
 
-        // 添加打印消息
+        // debug_bby // 添加打印消息（计算公式也要改）
         Serial.printf("[MSC] Sending chunk %u/%u: lba=%u, sector_offset=%u, data_length=%u (abs_offset=%u)\n", 
-                      (sent/240)+1, (data_len+239)/240, current_lba, current_offset_in_sector, chunk_size, current_absolute_offset);
-
-        // 打印完整的 send_frame 数据（协议头+数据）
-        Serial.printf("[FRAME] Complete frame data (%u bytes): ", (unsigned)p);
-        for (size_t i = 0; i < p; i++) {
-            Serial.printf("%02X ", buf[i]);
-            if ((i + 1) % 16 == 0) Serial.println(); // 每16字节换行
-        }
-        if (p % 16 != 0) Serial.println(); // 最后一行换行
-
-        // 如果是 LBA=0，单独打印末尾两个字节
-        if (current_lba == 0 && current_offset_in_sector + chunk_size >= 510) {
-            if (chunk_size >= 2) {
-                uint8_t b1 = data[sent + chunk_size - 2];
-                uint8_t b2 = data[sent + chunk_size - 1];
-                Serial.printf("[A] >>> LBA0 last two bytes = %02X %02X (expect 55 AA)\n", b1, b2);
-            }
-        }
+                      (sent/224)+1, (data_len+223)/224, current_lba, current_offset_in_sector, chunk_size, current_absolute_offset);
 
         send_frame(U_A2B_READCONTENT, buf, (uint8_t)p);
         
         sent += chunk_size;
     }
+}
+
+// 新增：发送全 0 空数据帧
+static void send_empty_frame(uint32_t lba, uint32_t offset, uint32_t len)
+{
+    uint8_t buf[12];
+    // lba
+    buf[0] = (uint8_t)(lba & 0xFF);
+    buf[1] = (uint8_t)((lba >> 8) & 0xFF);
+    buf[2] = (uint8_t)((lba >> 16) & 0xFF);
+    buf[3] = (uint8_t)((lba >> 24) & 0xFF);
+    // offset
+    buf[4] = (uint8_t)(offset & 0xFF);
+    buf[5] = (uint8_t)((offset >> 8) & 0xFF);
+    buf[6] = (uint8_t)((offset >> 16) & 0xFF);
+    buf[7] = (uint8_t)((offset >> 24) & 0xFF);
+    // len
+    buf[8]  = (uint8_t)(len & 0xFF);
+    buf[9]  = (uint8_t)((len >> 8) & 0xFF);
+    buf[10] = (uint8_t)((len >> 16) & 0xFF);
+    buf[11] = (uint8_t)((len >> 24) & 0xFF);
+    send_frame(U_EMPTY, buf, sizeof(buf));
+    Serial.printf("[MSC] send_empty_frame: lba=%u, offset=%u, len=%u (all zero)\n", lba, offset, len);
 }
 
 static void handle_read_command(const uint8_t *cmd, uint8_t len)
@@ -385,7 +396,7 @@ static void handle_read_command(const uint8_t *cmd, uint8_t len)
     uint32_t rd_len = (uint32_t)cmd[8] | ((uint32_t)cmd[9] << 8) | ((uint32_t)cmd[10] << 16) | ((uint32_t)cmd[11] << 24);
 
     // 添加打印消息
-    Serial.printf("[CMD] lba=%u, offset=%u, rd_len=%u\n", lba, offset, rd_len);
+     Serial.printf("[CMD] lba=%u, offset=%u, rd_len=%u\n", lba, offset, rd_len);
 
     // 计算实际的物理扇区范围
     uint32_t start_sector = lba + (offset / g_sector_size);
@@ -393,8 +404,8 @@ static void handle_read_command(const uint8_t *cmd, uint8_t len)
     uint32_t end_offset = start_offset + rd_len;
     uint32_t sectors_needed = (end_offset + g_sector_size - 1) / g_sector_size;
 
-    Serial.printf("[DEBUG] start_sector=%u, start_offset=%u, sectors_needed=%u\n", 
-                  start_sector, start_offset, sectors_needed);
+    //debug_bby Serial.printf("[DEBUG] start_sector=%u, start_offset=%u, sectors_needed=%u\n", 
+    //               start_sector, start_offset, sectors_needed);
 
     if (sectors_needed == 0) return;
 
@@ -413,11 +424,142 @@ static void handle_read_command(const uint8_t *cmd, uint8_t len)
         Serial.printf("[READ] Read sector %u successfully\n", start_sector + i);
     }
 
-    // 直接发送请求的数据段（从 start_offset 开始，长度为 rd_len）
-    send_readcontent_frame(lba, offset, rd_len, sec_buf + start_offset);
+    // 全 0 判断逻辑
+    bool all_zero = true;
+    for (uint32_t i = 0; i < rd_len; ++i) {
+        if (sec_buf[start_offset + i] != 0) {
+            all_zero = false;
+            break;
+        }
+    }
+    if (all_zero) {
+        send_empty_frame(lba, offset, rd_len);
+    } else {
+        // 直接发送请求的数据段（从 start_offset 开始，长度为 rd_len）
+        send_readcontent_frame(lba, offset, rd_len, sec_buf + start_offset);
+    }
 
     free(sec_buf);
 }
+
+// ------------------------------------------------------------
+// Write helpers
+// ------------------------------------------------------------
+static void send_writedone_frame(uint32_t lba, uint32_t offset, uint32_t wr_len, uint32_t status)
+{
+    // payload: lba(4) + offset(4) + len(4) + status(4)
+    uint8_t buf[16];
+    size_t p = 0;
+    // lba
+    buf[p++] = (uint8_t)(lba & 0xFF);
+    buf[p++] = (uint8_t)((lba >> 8) & 0xFF);
+    buf[p++] = (uint8_t)((lba >> 16) & 0xFF);
+    buf[p++] = (uint8_t)((lba >> 24) & 0xFF);
+    // offset
+    buf[p++] = (uint8_t)(offset & 0xFF);
+    buf[p++] = (uint8_t)((offset >> 8) & 0xFF);
+    buf[p++] = (uint8_t)((offset >> 16) & 0xFF);
+    buf[p++] = (uint8_t)((offset >> 24) & 0xFF);
+    // len
+    buf[p++] = (uint8_t)(wr_len & 0xFF);
+    buf[p++] = (uint8_t)((wr_len >> 8) & 0xFF);
+    buf[p++] = (uint8_t)((wr_len >> 16) & 0xFF);
+    buf[p++] = (uint8_t)((wr_len >> 24) & 0xFF);
+    // status
+    buf[p++] = (uint8_t)(status & 0xFF);
+    buf[p++] = (uint8_t)((status >> 8) & 0xFF);
+    buf[p++] = (uint8_t)((status >> 16) & 0xFF);
+    buf[p++] = (uint8_t)((status >> 24) & 0xFF);
+
+    send_frame(U_A2B_WRITEDONE, buf, (uint8_t)sizeof(buf));
+    Serial.printf("[WRITE] Done: lba=%u, offset=%u, len=%u, status=%u\n", lba, offset, wr_len, status);
+}
+
+/**
+ * @brief Handle U_B2A_WRITE command
+ *
+ * Payload format (little-endian), single-frame write:
+ *   struct {
+ *     uint32_t lba;     // starting LBA
+ *     uint32_t offset;  // byte offset within starting LBA
+ *     uint32_t len;     // data length that follows in this same frame
+ *     uint8_t  data[];  // len bytes
+ *   } __attribute__((packed));
+ *
+ * Note:
+ *  - This handler writes exactly the bytes carried by this single frame.
+ *  - Upper-layer may send multiple U_B2A_WRITE frames back-to-back to cover larger writes.
+ *  - For partial-sector writes, we do read-modify-write to preserve untouched bytes.
+ */
+static void handle_write_command(const uint8_t *cmd, uint8_t total_len)
+{
+    if (g_msc_dev == NULL || g_sector_size == 0) return;
+    if (total_len < 12) return;  // need at least header
+
+    // Parse header
+    uint32_t lba    = (uint32_t)cmd[0] | ((uint32_t)cmd[1] << 8) | ((uint32_t)cmd[2] << 16) | ((uint32_t)cmd[3] << 24);
+    uint32_t offset = (uint32_t)cmd[4] | ((uint32_t)cmd[5] << 8) | ((uint32_t)cmd[6] << 16) | ((uint32_t)cmd[7] << 24);
+    uint32_t wr_len = (uint32_t)cmd[8] | ((uint32_t)cmd[9] << 8) | ((uint32_t)cmd[10] << 16) | ((uint32_t)cmd[11] << 24);
+
+    if (wr_len == 0) { send_writedone_frame(lba, offset, wr_len, 0); return; }
+    if ((uint32_t)(total_len - 12) < wr_len) {
+        // Frame doesn't carry all declared data
+        Serial.printf("[WRITE][ERR] Frame len %u smaller than declared data %u\n", (unsigned)total_len, (unsigned)wr_len);
+        send_writedone_frame(lba, offset, wr_len, 1);
+        return;
+    }
+
+    const uint8_t *data = cmd + 12;
+
+    // Compute sector window
+    uint32_t start_sector    = lba + (offset / g_sector_size);
+    uint32_t start_off_in_se = offset % g_sector_size;
+    uint32_t end_offset      = start_off_in_se + wr_len;
+    uint32_t sectors_needed  = (end_offset + g_sector_size - 1) / g_sector_size;
+
+    Serial.printf("[WRITE] lba=%u, offset=%u, len=%u -> start_sector=%u, start_off=%u, sectors=%u\n",
+                  lba, offset, wr_len, start_sector, start_off_in_se, sectors_needed);
+
+    esp_err_t err = ESP_OK;
+    // For read-modify-write we allocate a staging buffer that covers all needed sectors
+    uint32_t buf_bytes = sectors_needed * g_sector_size;
+    uint8_t *staging = (uint8_t *)malloc(buf_bytes);
+    if (!staging) {
+        Serial.printf("[WRITE][ERR] malloc %u bytes failed\n", (unsigned)buf_bytes);
+        send_writedone_frame(lba, offset, wr_len, 2);
+        return;
+    }
+
+    // Read existing sectors first (to preserve bytes not covered by this frame)
+    for (uint32_t i = 0; i < sectors_needed; i++) {
+        err = msc_host_read_sector(g_msc_dev, start_sector + i, staging + i * g_sector_size, g_sector_size);
+        if (err != ESP_OK) {
+            Serial.printf("[WRITE][ERR] read back sector %u failed\n", start_sector + i);
+            free(staging);
+            send_writedone_frame(lba, offset, wr_len, 3);
+            return;
+        }
+    }
+
+    // Patch in new data
+    memcpy(staging + start_off_in_se, data, wr_len);
+
+    // Write back each affected sector
+    for (uint32_t i = 0; i < sectors_needed; i++) {
+        err = msc_host_write_sector(g_msc_dev, start_sector + i, staging + i * g_sector_size, g_sector_size);
+        if (err != ESP_OK) {
+            Serial.printf("[WRITE][ERR] write sector %u failed\n", start_sector + i);
+            free(staging);
+            send_writedone_frame(lba, offset, wr_len, 4);
+            return;
+        }
+    }
+
+    free(staging);
+    // Success
+    send_writedone_frame(lba, offset, wr_len, 0);
+}
+
 
 //bby
 static void msc_task(void *args)
@@ -493,6 +635,8 @@ static void msc_task(void *args)
             // 解析来自上游的命令
             if (msg.data.cmd.type == U_B2A_READ) {
                 handle_read_command(msg.data.cmd.data, msg.data.cmd.len);
+            } else if (msg.data.cmd.type == U_B2A_WRITE) {
+                handle_write_command(msg.data.cmd.data, msg.data.cmd.len);
             }
         }
     }
@@ -513,6 +657,9 @@ static void uart_task(void *arg) {
             msg.data.cmd.type = type;               // 记录命令类型
             memcpy(msg.data.cmd.data, payload, len);           // ← 改3：使用 cmd 成员
             msg.data.cmd.len = len;
+            if (type == U_B2A_WRITE) {
+                Serial.printf("[UART] RX WRITE frame, len=%u\n", len);
+            }
             xQueueSend(app_queue, &msg, portMAX_DELAY);
         }
         vTaskDelay(1);

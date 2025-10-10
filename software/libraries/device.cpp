@@ -170,8 +170,8 @@ static int32_t onWrite(uint32_t lba, uint32_t offset, uint8_t *buffer, uint32_t 
           
           if (received >= bufsize) break;
           
-          Serial.printf("[MSC] Timeout: received %u/%lu bytes\n",
-                        (unsigned)received, (unsigned long)bufsize); //only print when timeout
+          // Serial.printf("[MSC] Timeout: received %u/%lu bytes\n",
+          //   (unsigned)received, (unsigned long)bufsize); //only print when timeout
         }          
 
         // ⑦ 打印buffer当前所有数据，每16字节换行，每16行多换一次行

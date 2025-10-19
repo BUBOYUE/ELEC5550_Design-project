@@ -1,0 +1,170 @@
+*******************************************************************************
+* Copyright (C) Maxim Integrated Products, Inc., All Rights Reserved.
+*
+* Permission is hereby granted, free of charge, to any person obtaining a
+* copy of this software and associated documentation files (the "Software"),
+* to deal in the Software without restriction, including without limitation
+* the rights to use, copy, modify, merge, publish, distribute, sublicense,
+* and/or sell copies of the Software, and to permit persons to whom the
+* Software is furnished to do so, subject to the following conditions:
+*
+* The above copyright notice and this permission notice shall be included
+* in all copies or substantial portions of the Software.
+*
+* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+* OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+* IN NO EVENT SHALL MAXIM INTEGRATED BE LIABLE FOR ANY CLAIM, DAMAGES
+* OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+* ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+* OTHER DEALINGS IN THE SOFTWARE.
+*
+* Except as contained in this notice, the name of Maxim Integrated
+* Products, Inc. shall not be used except as stated in the Maxim Integrated
+* Products, Inc. Branding Policy.
+*
+* The mere transfer of this software does not imply any licenses
+* of trade secrets, proprietary technology, copyrights, patents,
+* trademarks, maskwork rights, or any other form of intellectual
+* property whatsoever. Maxim Integrated Products, Inc. retains all
+* ownership rights.
+*******************************************************************************
+* The MAX40026 are single-supply, highspeed comparators with a typical propagation delay of 280ps. 
+* The device offers a supply voltage from 2.7V to 3.6V  and 
+
+*******************************************************************************
+.SUBCKT MAX40026 INP INN GND VDD OUTP OUTN
+*				  |	  |	  |	   |   |    |
+*				  |	  |	  |	   |   |    Inverting LVDS Output
+*				  |	  |	  |	   |   | 
+*				  |	  |	  |	   |    Non-Inverting LVDS Output 
+*				  |	  |	  |	   |
+*				  |	  |	  |	    Supply Voltage
+*				  |	  |	  |
+*				  |	  |	   Ground
+*				  |	  |
+*				  |	   Inverting Input 
+*				  |
+*				   Non-Inverting Input 
+*
+* Date of model creation: 
+*		2019/5
+*
+* Revision History: 
+* 		Version 2.0
+*       Version 3.0
+*
+* Recommendations:
+*     	Use SIMETRIX (or SPICE 2G6; other simulators may require translation)
+*     	For a quick, effective design, use a combination of: data sheet
+* 	    specs, bench testing, and simulations with this macromodel
+*
+* Supported:
+*		Model works only at temperature of 25 degree celsius
+*		Power up_down response ,Propagation Delay
+*
+* Not Supported:
+*       Dispersion is not modelled.
+*       This model does not operate other than 25 degree celsius.
+		
+*
+* Known Discrepancies in Model vs. Datasheet:
+*     	Rise time and Fall-Time value is slightly higher than that of datasheet electrical characteristic value.
+*		Output Skew is less than the datasheet Value.
+
+XCOMP INP INN GND VDD OUTP OUTN MAX40026_INT
+.ENDS MAX40026
+******************************************************************************************************************************************
+.subckt MAX40026_INT IN+ IN- GND VDD OUT+ OUT-
+Ein in 0 value={V(in+)-V(in-)}
+Eicm icm 0 value={(V(in+)+V(in-))*0.5}
+Eh1 h1 0 value={if(V(in)>V(os),1,-1)}
+Eos os 0 value={0.0005+1m*V(vdd)+0.1m*V(icm)-4.046m-(V(out+)-1.25)/222}
+Rinp h1 h2 100
+Cinp h2 0 1.5p
+Rinn h1 inn 100
+Cinn inn 0 2p
+Eh3 h3 0 value={V(h2)+1}
+Eh31 h31 0 value={V(h3)*V(a2)}
+Ea1 a1 0 value={ABS(V(in))/0.01}
+Ea2 a2 0 table {V(a1)} = (1,1) (100,1.11)
+X_1 0 h31 h4 hp2h
+X_2 0 h3 h7 hp2q
+Eh5 h5 0 value={V(h4)*2-1}
+Eh6 h6 0 value={V(h7)*2-1}
+Eop out1+ ocm value={0.175*V(h5)*V(eh)}
+Dp1 out1+ oo1 D1
+Dp2 oo2 out1+ D1
+Dp3 oo2 out+ D1
+Dp4 out+ oo1 D1
+.model D1 D
+Co1 out+ 0 4.5p
+Co2 out- 0 4.5p
+Io1 oo1 oo2 5m
+Dn1 out1- on1 D1
+Dn2 on2 out1- D1
+Dn3 on2 out- D1
+Dn4 out- on1 D1
+Io2 on1 on2 5m
+Eon out1- ocm value={-0.175*V(h6)*V(eh)}
+Vocm ocm 0 1.25
+G1 ii1 0 value={1.15u-4.6u*V(in)}
+V10 0 ii1 0 
+V20 0 ii2 0 
+Gcc vdd 0 value={(2.5m+4.5m*V(vdd))*V(gh)}
+G2 ii2 0 value={4.6u*V(in)+1.15u}
+Ecc cc 0 vdd 0 1
+Rdh cc dh 100
+Cdh dh 0 1u
+Edh eh 0 value={if(V(dh)>0.6,1,0)}
+Efh fh 0 value={V(dh)*1.23558}
+Egh gh 0 table {V(fh)} = (0,0) (1,1) (100,1)
+Gin+ in+ 0 value={5u}
+Gin- in- 0 value={3u}
+Cin+ in+ 0 2p
+Cin- in- 0 2p
+.ENDS MAX40026_INT
+**************************************************************************************
+.SUBCKT hp2h 18 91 cs
+**************************************************************************************
+V10a 10 18 5
+E20 20 18 10 18 0.5
+Ecs cs 18 VALUE={V(96)-V(20)}
+*SHUTDOWN
+RSHIN 91 20 5000K
+ESH3 220 20 91 18 1
+RSHA 220 221 500
+CSHA 221 20 .04P
+ESH2 92 20 221 20 1
+RSH1 92 93 100
+VSH1 93 94 0V
+EHYS 95 94 POLY(2) 10 18 96 20 0 0 0 0 0.11
+RBL 94 20 10l 
+ESH1 95 20 10 18 0.25
+****
+E96 96 18 value={if(I(vsh1)<0,2.5,3.5)}
+.MODEL DA D(N=10M)
+.ENDS hp2h
+**************************************************************************************
+**************************************************************************************
+.SUBCKT hp2q 18 91 cs
+**************************************************************************************
+V10a 10 18 5
+E20 20 18 10 18 0.5
+Ecs cs 18 VALUE={V(96)-V(20)}
+*SHUTDOWN
+RSHIN 91 20 5000K
+ESH3 220 20 91 18 1
+RSHA 220 221 713
+CSHA 221 20 .04P
+ESH2 92 20 221 20 1
+RSH1 92 93 100
+VSH1 93 94 0V
+EHYS 95 94 POLY(2) 10 18 96 20 0 0 0 0 0.11
+RBL 94 20 10l 
+ESH1 95 20 10 18 0.25
+****
+E96 96 18 value={if(I(vsh1)<0,2.5,3.5)}
+.MODEL DA D(N=10M)
+.ENDS hp2q
+*************************************************************************************

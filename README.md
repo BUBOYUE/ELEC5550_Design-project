@@ -1,45 +1,122 @@
-# ELEC5550 Design Project – Laser Communication System
+## Version Information
 
-本项目是 ELEC5550 课程设计项目，目标是实现基于 **激光通信** 的 **双 ESP32-S3 MUC**数据传输系统，支持 **USB 键盘/鼠标/存储设备** 数据通过 UART/激光链路传输到另一台计算机。
+- **Version:** 3.0 (Final Release)
+- **Date:** 2025-10-19
+- **Editor:** Boyue BU
+- **Description:**
+  - Completed the final version of the project (software, hardware, and documentation updated).
+  - Added compatibility note for **ESP32-S3 DevKitC V1**, allowing firmware testing without the custom PCB.
+  - Improved **Host/Device** dual communication protocol and FEC verification mechanism.
+  - Updated **README.md** with library linking instructions and board compatibility notes.
+  - Added **BSD 3-Clause License** for attribution-based redistribution.
+  - Expanded **References** section with official ESP-IDF and TinyUSB sources.
+  - Adjusted folder structure for correct GitHub rendering.
+  - Enhanced TinyUSB HID/MSC framework and debugging interfaces.
+
+
+# ELEC5550 Design Project – Laser-Based USB Communication System
+
+This repository contains the complete design files for the **ELEC5550 Design Project** at the **University of Western Australia (UWA)**.  
+The goal of this project is to develop a **dual ESP32-S3 optical communication bridge** that enables transparent data transfer between a **PC** and **USB devices** (keyboard, mouse, or mass storage) through a **laser-based optical link**.
 
 ---
 
-## **项目结构**
+## 📁 Project Structure
 
+```
 ELEC5550_Design-project/
 │
-├── docs/                   # 文档相关
+├── docs/                         # datasheets,figures
 │
-├── hardware/               # 硬件设计
-│   ├── schematics/         # 电路原理图（KiCAD/Altium）
-│   ├── pcb/                # PCB Layout
-│   └── bom/                # 元器件清单（BOM）
+├── hardware/                     # Hardware design files
+│   ├── schematics/               # Circuit schematics (KiCad / Altium)
+│   ├── pcb/                      # PCB layout and Gerber files
+│   └── sim/                      # Simulation on LTspice
 │
-├── software/               # 软件（嵌入式代码）
-│   ├── esp32_a_host.ino    # Host 板（USB Host + UART 发送）
-│   ├── esp32_b_device.ino  # Device 板（UART 接收 + USB Device 输出）
-│   └── libraries/          # 项目内局部库
-│       ├── common/         # 公共模块（UART、CRC、帧封装）
-│       ├── host_lib/       # Host 模块（USB Host 逻辑）
-│       └── device_lib/     # Device 模块（USB HID 逻辑）
+├── software/                     # Firmware source code for ESP32-S3 boards
+│   ├── esp32_a_host/             # Host-side firmware (USB Host + UART TX)
+│   ├── esp32_b_device/           # Device-side firmware (UART RX + USB Device)
+│   ├── esp32s3_usb_passthrough/  # Combined HID + MSC passthrough final demo
+│   └── libraries/                # Local Arduino libraries (CRC, UART, FEC, etc.)
 │
-├── tools/                  # 辅助脚本/工具
+├── tools/                        # Utility scripts or helper tools
 │
-└── README.md               # 本文件
-
-## **版本信息**
-- **Version:** 1.0 (Initial Version)
-- **Date:** 2025-08-03
-- **Editor** BOYUE BU
-- **description**  
-  - 初始项目结构建立（docs/hardware/software/tools）  
-  - 创建 Host/Device `.ino` 框架  
-  - 建立 `common/host_lib/device_lib` 三个本地库目录  
-  - 预留文档和硬件目录结构
+└── README.md 
+```
 
 ---
 
-## **使用方法**
-1. 克隆仓库：
-   ```bash
-   git clone https://github.com/<yourusername>/ELEC5550_Design-project.git
+## 🧩 Hardware Compatibility
+
+This project is designed for the **ESP32-S3 WROOM N16R8** module used on the custom PCB.  
+If you do not have access to the fabricated PCB, the firmware can still be tested using an **ESP32-S3 DevKitC V1** board.  
+Simply connect the UART interface between two boards according to the schematic, and the program will run with equivalent functionality.
+
+---
+
+## ⚙️ Setup Guide
+
+### 1. Clone the Repository
+```bash
+git clone https://github.com/BUBOYUE/ELEC5550_Design-project.git
+```
+
+### 2. Link the Local Libraries
+To ensure the Arduino IDE can locate the custom libraries used in this project, create symbolic links from the project’s `libraries` folder to your Arduino library path.
+
+**Mac/Linux:**
+```bash
+ln -s <path_to_project>/software/libraries ~/Documents/Arduino/libraries/ELEC5550_LIBS
+```
+
+**Windows (PowerShell):**
+```powershell
+New-Item -ItemType SymbolicLink -Path "$env:USERPROFILE\Documents\Arduino\libraries\ELEC5550_LIBS" -Target "<path_to_project>\software\libraries"
+```
+
+### 3. Open and Flash
+1. Open `esp32_a_host.ino` or `esp32_b_device.ino` using Arduino IDE.  
+2. Select **Board:** `ESP32S3 Dev Module`.  
+3. Set **Upload Speed:** `460800`.  
+4. Enable **USB CDC On Boot** if available.  
+5. Connect the board and upload.
+
+---
+
+## 💡 Project Overview
+
+- **Architecture:** Dual ESP32-S3 optical bridge  
+- **Communication Link:** UART or laser-based optical channel  
+- **Supported Protocols:** HID (mouse/keyboard) + MSC (USB mass storage)  
+- **Error Handling:** CRC-16 + Reed–Solomon FEC  
+- **Operating Voltage:** 5V / 1A (from PC or power bank)
+
+The host board (ESP32-A) acts as a USB Host, while the device board (ESP32-B) emulates a USB peripheral, enabling transparent USB data transmission over light.
+
+---
+
+## 🧠 Contributors
+- **Boyue BU** – Software (Host-side, USB HID/MSC RTOS structure)
+- **Elyney OU** – Software (Device-side, TinyUSB HID/MSC logic)
+- **Kunze CHEN** – Software (UART Communication Protocol)
+- **Zhanjun XU** – Hardware (Laser Driver Design & PCB design)
+- **Zhe WANG** – Hardware (Receiver Design & System Testing)
+- **Bowen LIU** – Hardware (Receiver Design & System Testing)
+
+---
+
+## 🧩 References
+- [ESP-IDF TinyUSB Examples](https://github.com/espressif/esp-idf/tree/master/examples/peripherals/usb)
+- [Arduino-ESP32 USBMSC Example](https://github.com/espressif/arduino-esp32/blob/master/libraries/USB/examples/USBMSC/USBMSC.ino)
+- [TinyUSB Library](https://github.com/hathach/tinyusb)
+- [Reed–Solomon C++ Implementation (mersinvald)](https://github.com/mersinvald/Reed-Solomon/blob/master/include/rs.hpp)
+- [CRC Algorithms Reference (Boost.CRC library, C++)](https://www.boost.org/doc/libs/release/libs/crc/crc.html)
+- [ESP-IDF USB Host HID Example](https://github.com/espressif/esp-idf/tree/master/examples/peripherals/usb/host/hid)
+- [ESP-IDF USB Host MSC Example](https://github.com/espressif/esp-idf/tree/master/examples/peripherals/usb/host/msc)
+---
+
+
+## 📜 License
+This project is licensed under the [BSD 3-Clause License](./LICENSE).  
+© 2025 ELEC5550 Optical Communication Team, University of Western Australia.  
+Redistribution is permitted with acknowledgment of the original authors.

@@ -1,0 +1,24 @@
+
+
+
+# Useful Tools and Links
+
+This project uses several essential software tools for development, debugging, and circuit design. Below is a summary of the main tools, their purposes, and official download links.
+
+- **Wireshark** – Used for USB protocol analysis and packet inspection during data transmission debugging.  
+  🔗 Official site: [https://www.wireshark.org/](https://www.wireshark.org/)
+
+- **Arduino IDE** – Used for writing, compiling, and uploading embedded code to ESP32-S3 boards.  
+  🔗 Official site: [https://www.arduino.cc/en/software](https://www.arduino.cc/en/software)
+
+- **ESP-IDF** – Provides low-level development support and official SDKs for USB Host/Device functionalities.  
+  🔗 Official site: [https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/)
+
+- **Altium Designer** – Used for PCB schematic design and layout of the optical transceiver hardware.  
+  🔗 Official site: [https://www.altium.com/](https://www.altium.com/)
+
+- **LTspice** – Used for circuit simulation, especially for the laser driver and receiver amplifier circuits.  
+  🔗 Official site: [https://www.analog.com/en/resources/design-tools-and-calculators/ltspice-simulator.html](https://www.analog.com/en/resources/design-tools-and-calculators/ltspice-simulator.html)
+
+- **CoolTerm** – Serial communication tool for UART debugging and data monitoring between the two ESP32-S3 boards.  
+  🔗 Official site: [https://freeware.the-meiers.org/](https://freeware.the-meiers.org/)

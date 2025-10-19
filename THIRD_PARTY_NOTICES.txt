@@ -1,0 +1,65 @@
+THIRD-PARTY NOTICES
+===================
+
+This project, ELEC5550_Design-project (Laser-Based USB Communication System),
+incorporates and depends on several third-party open-source software components.
+The following notices are provided in compliance with their respective licenses.
+
+-------------------------------------------------------------------------------
+1. ESP-IDF (Espressif IoT Development Framework)
+   License: Apache License 2.0
+   Source: https://github.com/espressif/esp-idf
+   Copyright (c) 2016-2025 Espressif Systems (Shanghai) Co., Ltd.
+   Description:
+     The ESP-IDF framework provides USB Host and Device support via TinyUSB
+     and related hardware abstraction layers used in this project.
+
+-------------------------------------------------------------------------------
+2. Arduino-ESP32 Core and USB Examples
+   License: GNU Lesser General Public License (LGPL) 2.1
+   Source: https://github.com/espressif/arduino-esp32
+   Copyright (c) 2015-2025 Espressif Systems (Shanghai) Co., Ltd.
+   Description:
+     Example USBMSC and HID implementations were referenced to design
+     the dual-host/device firmware and USB passthrough logic.
+
+-------------------------------------------------------------------------------
+3. TinyUSB Library
+   License: MIT License
+   Source: https://github.com/hathach/tinyusb
+   Copyright (c) 2018 Ha Thach (tinyusb.org)
+   Description:
+     Provides a lightweight USB Host/Device stack for embedded systems,
+     used for HID and MSC data transfer in the device-side firmware.
+
+-------------------------------------------------------------------------------
+4. Reed–Solomon C++ Implementation (by mersinvald)
+   License: MIT License
+   Source: https://github.com/mersinvald/Reed-Solomon
+   Copyright (c) 2017 Mersinvald (https://github.com/mersinvald)
+   Description:
+     The Reed–Solomon FEC encoder/decoder was referenced to build
+     the Forward Error Correction layer ensuring data reliability
+     under optical noise and link instability.
+
+-------------------------------------------------------------------------------
+5. Boost.CRC (Boost C++ Libraries)
+   License: Boost Software License 1.0
+   Source: https://www.boost.org/doc/libs/release/libs/crc/crc.html
+   Copyright (c) Boost Contributors
+   Description:
+     CRC-16 algorithm reference used to validate UART/Optical frame
+     integrity in the project’s protocol layer.
+
+-------------------------------------------------------------------------------
+
+The ELEC5550 Optical Communication Team acknowledges and thanks the authors
+of the above open-source software. Each component remains under its original
+license, and the corresponding license texts can be found under the /LICENSES
+directory or the original source repositories.
+
+-------------------------------------------------------------------------------
+Project Maintainers:
+University of Western Australia – ELEC5550 Group 13 (Optical Communication)
+Contributors: Boyue BU, Elyney OU, Kunze CHEN, Zhanjun XU, Zhe WANG, Bowen LIU
+Date: October 2025

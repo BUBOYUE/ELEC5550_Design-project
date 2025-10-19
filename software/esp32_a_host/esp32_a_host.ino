@@ -1,3 +1,51 @@
+/*
+================================================================================
+ Project : Dual ESP32‑S3 Optical USB Bridge (HID + MSC)
+ Course  : UWA ELEC5550 – Design Project (2025 S2)
+ File    : esp32_a_host.ino — Host‑side firmware
+ Authors : Boyue BU
+ Date    :    2025-08-15
+
+ Summary :
+   • Board A (USB Host) connects to the PC, enumerates HID/MSC devices via
+     TinyUSB and bridges them to Board B (USB Device) over a framed UART link
+     carried over electrical or optical channel.
+   • Framing protocol: [0xAA | Type | Length | Payload | CRC16] with optional
+     Reed–Solomon FEC parity; max payload per frame chunk = 224 bytes.
+   • Major tasks/modules: USB host service (HID + MSC), UART RX/TX framing,
+     application queue (APP_COMMAND, device connect/disconnect), and optional
+     CRC/FEC correction flow.
+   • HID: forwards mouse/keyboard reports (type 0x01/0x02).
+   • MSC: translates SCSI READ10/WRITE10 into U_B2A_READ/U_B2A_WRITE and
+     returns U_A2B_READCONTENT/U_A2B_WRITEDONE/U_EMPTY, etc.
+
+ Build & Flash (Arduino IDE):
+   • Board           : ESP32S3 Dev Module
+   • Upload speed    : 460800
+   • USB CDC On Boot : Enabled (if available)
+   • Partition       : Default
+   • Open `software/esp32_a_host/esp32_a_host.ino` and Upload.
+
+ Hardware & Interfaces:
+   • Power      : 5 V / 1 A via USB‑C (PC or power bank)
+   • Role       : SWITCH2 — Left = A‑end (Host), Right = B‑end (Device)
+   • Debug UART : USB‑CDC @ 460800 bps
+
+ Compatibility (host PC):
+   • Verified on Windows 11 (native HID/MSC). macOS/Linux not validated.
+
+ Notice:
+   • This source code is released for academic use by UWA student teams.
+     Use at your own risk; no warranty is expressed or implied.
+
+    * Reference:
+    *   This implementation draws on (and adapts) the official ESP‑IDF USB Host examples:
+    *     - HID Host example:    examples/peripherals/usb/host/hid/hid_host
+    *     - MSC Host example:    examples/peripherals/usb/host/msc/msc_host
+    *   demonstrated in those examples from Espressif.
+    ================================================================================
+ */
+
 #include <Arduino.h>
 #include <stdio.h>
 #include <string.h>
@@ -25,8 +73,8 @@
 #include "msc_host.h"
 #include "msc_host_vfs.h"
 
-#include "uart.h"   // 提供：uart2_init(), send_frame(...)
-#include "usb.h"    // 可选：若后续把帧转给 USB HID 设备
+#include "uart.h"   // Provides: uart2_init(), send_frame(uint8_t type, const uint8_t* payload, uint8_t len)
+#include "usb.h"    // Optional: for future USB HID device forwarding
 
 static const char *TAG = "example";
 
@@ -44,65 +92,44 @@ static const char *TAG = "example";
 // TODO: Remove this line after MSC Class Driver will support it
 static bool dev_present = false;
 
-static uint32_t g_sector_size = 512;                 // 从设备信息更新
-static msc_host_device_handle_t g_msc_dev = NULL;    // 当前 MSC 设备句柄
-static const uint8_t CHUNK_DATA_MAX = 224;           // 单帧分片最大数据长度（从240改为224）
+static uint32_t g_sector_size = 512;                 // Updated from device info
+static msc_host_device_handle_t g_msc_dev = NULL;    // Current MSC device handle
+static const uint8_t CHUNK_DATA_MAX = 224;           // Max data length per frame chunk (changed from 240 to 224)
 
 /**
  * @brief Application Queue and its messages ID
  */
 static QueueHandle_t app_queue;
-//bby typedef struct {
-//     enum {
-//         APP_QUIT,                // Signals request to exit the application
-//         APP_DEVICE_CONNECTED,    // USB device connect event
-//         APP_DEVICE_DISCONNECTED, // USB device disconnect event
-//     } id;
-//     union {
-//         uint8_t new_dev_address; // Address of new USB device for APP_DEVICE_CONNECTED event if
-//     } data;
-// } app_message_t;
 
 typedef enum {
-    APP_QUIT = 0,             // 显式定义数值
+    APP_QUIT = 0,             // Explicitly define values
     APP_DEVICE_CONNECTED,
     APP_DEVICE_DISCONNECTED,
-    APP_COMMAND,//bby
+    APP_COMMAND,
 } app_event_id_t;
-
-// typedef struct {
-//     app_event_id_t id;        // 用刚才定义的类型
-//     union {
-//         uint8_t new_dev_address;
-//     } data;
-// } app_message_t;
-
 
 typedef struct {
     app_event_id_t id;
     union {
         uint8_t new_dev_address;
-        struct {                   // 用于 UART 命令转发
-            uint8_t type;          // 帧类型（MsgType）
-            uint8_t data[256];     // 负载
-            uint8_t len;           // 负载长度
+        struct {                   // For UART command forwarding
+            uint8_t type;          // Frame type (MsgType)
+            uint8_t data[256];     // Payload
+            uint8_t len;           // Payload length
         } cmd;
     } data;
 } app_message_t;
 
-
-
-// 电脑端通过 UART 发送“原始类型 + 原始负载”到本板：
-//   - 鼠标：  TYPE = 0x01, 接着 3 字节 [dx, dy, btn]
-//   - 键盘：  TYPE = 0x02, 接着 8 字节 [modifier, key1..key6, reserved]
-// 本板把这段原始负载用 send_frame(type, payload, len) 统一打包（加 STX/CRC）再发送到下游。
+// PC sends "raw type + raw payload" to this board via UART:
+//   - Mouse:  TYPE = 0x01, followed by 3 bytes [dx, dy, btn]
+//   - Keyboard: TYPE = 0x02, followed by 8 bytes [modifier, key1..key6, reserved]
+// This board packs this raw payload using send_frame(type, payload, len) (adds STX/CRC) and sends downstream.
 
 /*
  * SPDX-FileCopyrightText: 2022-2023 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Unlicense OR CC0-1.0
  */
-
 
 /* GPIO Pin number for quit from example logic */
 #define APP_QUIT_PIN                GPIO_NUM_0
@@ -385,30 +412,6 @@ static void hid_host_keyboard_report_callback(const uint8_t *const data,
  * @param[in] data    Pointer to input report data buffer
  * @param[in] length  Length of input report data buffer
  */
-// bby static void hid_host_mouse_report_callback(const uint8_t *const data,
-//                                            const int length){ 
-//   hid_mouse_input_report_boot_t *mouse_report =
-//       (hid_mouse_input_report_boot_t *)data;
-
-//   if (length < sizeof(hid_mouse_input_report_boot_t)) {
-//     return;
-//   }
-
-//   static int x_pos = 0;
-//   static int y_pos = 0;
-
-//   // Calculate absolute position from displacement
-//   x_pos += mouse_report->x_displacement;
-//   y_pos += mouse_report->y_displacement;
-
-//   hid_print_new_device_report_header(HID_PROTOCOL_MOUSE);
-
-//   printf("X: %06d\tY: %06d\t|%c|%c|\r", x_pos, y_pos,
-//          (mouse_report->buttons.button1 ? 'o' : ' '),
-//          (mouse_report->buttons.button2 ? 'o' : ' '));
-//   fflush(stdout);
-// }
-
 static void hid_host_mouse_report_callback(const uint8_t *const data,
                                            const int length){
   // DEBUG: dump raw mouse report as signed decimal (int8)
@@ -416,12 +419,12 @@ static void hid_host_mouse_report_callback(const uint8_t *const data,
   for (int i = 0; i < length; ++i) printf(" %4d", (int)((int8_t)data[i]));
   printf("\r\n");
   fflush(stdout);
-  // 自适配 Boot/Report 常见布局；见上三种格式
+  // Auto-adapt Boot/Report common layouts; see above three formats
   const uint8_t *p = data;
   int remaining = length;
   if (remaining < 3) return;
 
-  // 简单启发式：若第 0 字节不像按钮掩码而第 1 字节像，则认为第 0 字节是 Report ID
+  // Simple heuristic: if byte 0 doesn't look like button mask but byte 1 does, assume byte 0 is Report ID
   bool has_report_id = false;
   if ((p[0] & 0xF8) && remaining >= 5 && (p[1] & 0xF8) == 0) {
     has_report_id = true;
@@ -521,7 +524,6 @@ void hid_host_interface_callback(hid_host_device_handle_t hid_device_handle,
     ESP_ERROR_CHECK(hid_host_device_get_raw_input_report_data(
         hid_device_handle, data, 64, &data_length));
 
-    //bby if (HID_SUBCLASS_BOOT_INTERFACE == dev_params.sub_class) {
       if (HID_PROTOCOL_KEYBOARD == dev_params.proto) {
         hid_host_keyboard_report_callback(data, data_length);
       } else if (HID_PROTOCOL_MOUSE == dev_params.proto) {
@@ -571,7 +573,6 @@ void hid_host_device_event(hid_host_device_handle_t hid_device_handle,
     if (HID_SUBCLASS_BOOT_INTERFACE == dev_params.sub_class) {
       ESP_ERROR_CHECK(hid_class_request_set_protocol(hid_device_handle,
                                                      HID_REPORT_PROTOCOL_REPORT));
-                                                    //  HID_REPORT_PROTOCOL_BOOT));//BBY
       if (HID_PROTOCOL_KEYBOARD == dev_params.proto) {
         ESP_ERROR_CHECK(hid_class_request_set_idle(hid_device_handle, 0, 0));
       }
@@ -669,7 +670,7 @@ void hid_host_device_callback(hid_host_device_handle_t hid_device_handle,
   xQueueSend(hid_host_event_queue, &evt_queue, 0);
 }
 
-//-----------------MSC相关-----------------
+// MSC Related Code
 
 /**
  * @brief BOOT button pressed callback
@@ -708,7 +709,6 @@ static void msc_event_cb(const msc_host_event_t *event, void *arg)
         ESP_LOGI(TAG, "MSC device connected (usb_addr=%d)", event->device.address);
         app_message_t message = {
             .id = APP_DEVICE_CONNECTED,
-            // .data.new_dev_address = event->device.address,bby
             .data = { .new_dev_address = event->device.address },
         };
         xQueueSend(app_queue, &message, portMAX_DELAY);
@@ -755,7 +755,6 @@ static void print_device_info(msc_host_device_info_t *info)
     //   sector_size  = payload[0] | (payload[1]<<8) | (payload[2]<<16) | (payload[3]<<24);
     //   sector_count = payload[4] | (payload[5]<<8) | (payload[6]<<16) | (payload[7]<<24);
 
-    // 添加打印消息
     Serial.printf("[UART] INIT packet sent: sector_size=%u, sector_count=%u\n", 
                   info->sector_size, info->sector_count);
 
@@ -825,7 +824,6 @@ void speed_test(void)
     setvbuf(f, NULL, _IOFBF, BUFFER_SIZE);
 
     // Allocate application buffer used for read/write
-    // uint8_t *data = malloc(BUFFER_SIZE); bby
     uint8_t *data = (uint8_t *) malloc(BUFFER_SIZE);
     assert(data);
 
@@ -878,17 +876,17 @@ static void usb_task(void *args)
 static void send_readcontent_frame(uint32_t lba, uint32_t offset, uint32_t data_len,
                                    const uint8_t* data)
 {
-    // 按224字节分片发送数据（从240改为224）
+    // Send data in 224-byte chunks (changed from 240 to 224)
     uint32_t sent = 0;
     while (sent < data_len) {
-        uint32_t chunk_size = (data_len - sent > 224) ? 224 : (data_len - sent); // 240改为224
+        uint32_t chunk_size = (data_len - sent > 224) ? 224 : (data_len - sent); // changed from 240 to 224
         
-        // 计算当前chunk对应的实际LBA和扇区内偏移
+        // Calculate actual LBA and sector offset for current chunk
         uint32_t current_absolute_offset = offset + sent;
         uint32_t current_lba = lba + (current_absolute_offset / g_sector_size);
         uint32_t current_offset_in_sector = current_absolute_offset % g_sector_size;
         
-        uint8_t buf[4 + 4 + 4 + 224]; // lba(4) + offset(4) + data_length(4) + data(最大224字节，从240改为224)
+        uint8_t buf[4 + 4 + 4 + 224]; // lba(4) + offset(4) + data_length(4) + data(max 224 bytes, changed from 240 to 224)
         size_t p = 0;
         
         // current_lba (LE)
@@ -903,7 +901,7 @@ static void send_readcontent_frame(uint32_t lba, uint32_t offset, uint32_t data_
         buf[p++] = (uint8_t)((current_offset_in_sector >> 16) & 0xFF);
         buf[p++] = (uint8_t)((current_offset_in_sector >> 24) & 0xFF);
         
-        // data_length (LE) - 当前帧的数据长度
+        // data_length (LE) - current frame data length
         buf[p++] = (uint8_t)(chunk_size & 0xFF);
         buf[p++] = (uint8_t)((chunk_size >> 8) & 0xFF);
         buf[p++] = (uint8_t)((chunk_size >> 16) & 0xFF);
@@ -913,7 +911,6 @@ static void send_readcontent_frame(uint32_t lba, uint32_t offset, uint32_t data_
         memcpy(&buf[p], data + sent, chunk_size);
         p += chunk_size;
 
-        // debug_bby // 添加打印消息（计算公式也要改）
         Serial.printf("[MSC] Sending chunk %u/%u: lba=%u, sector_offset=%u, data_length=%u (abs_offset=%u)\n", 
                       (sent/224)+1, (data_len+223)/224, current_lba, current_offset_in_sector, chunk_size, current_absolute_offset);
 
@@ -923,7 +920,7 @@ static void send_readcontent_frame(uint32_t lba, uint32_t offset, uint32_t data_
     }
 }
 
-// 新增：发送全 0 空数据帧
+// Send all-zero empty data frame
 static void send_empty_frame(uint32_t lba, uint32_t offset, uint32_t len)
 {
     uint8_t buf[12];
@@ -948,34 +945,30 @@ static void send_empty_frame(uint32_t lba, uint32_t offset, uint32_t len)
 
 static void handle_read_command(const uint8_t *cmd, uint8_t len)
 {
-    // 固定协议：12B 小端结构
+    // Fixed protocol: 12B little-endian structure
     // struct { uint32_t lba; uint32_t offset; uint32_t len; } __attribute__((packed));
     if (g_msc_dev == NULL || g_sector_size == 0) return;
-    if (len != 12) return;  // 仅支持 12 字节版本
+    if (len != 12) return;  // Only support 12-byte version
 
-    // 解析参数（小端）
+    // Parse parameters (little-endian)
     uint32_t lba    = (uint32_t)cmd[0] | ((uint32_t)cmd[1] << 8) | ((uint32_t)cmd[2] << 16) | ((uint32_t)cmd[3] << 24);
     uint32_t offset = (uint32_t)cmd[4] | ((uint32_t)cmd[5] << 8) | ((uint32_t)cmd[6] << 16) | ((uint32_t)cmd[7] << 24);
     uint32_t rd_len = (uint32_t)cmd[8] | ((uint32_t)cmd[9] << 8) | ((uint32_t)cmd[10] << 16) | ((uint32_t)cmd[11] << 24);
 
-    // 添加打印消息
      Serial.printf("[CMD] lba=%u, offset=%u, rd_len=%u\n", lba, offset, rd_len);
 
-    // 计算实际的物理扇区范围
+    // Calculate actual physical sector range
     uint32_t start_sector = lba + (offset / g_sector_size);
     uint32_t start_offset = offset % g_sector_size;
     uint32_t end_offset = start_offset + rd_len;
     uint32_t sectors_needed = (end_offset + g_sector_size - 1) / g_sector_size;
-
-    //debug_bby Serial.printf("[DEBUG] start_sector=%u, start_offset=%u, sectors_needed=%u\n", 
-    //               start_sector, start_offset, sectors_needed);
 
     if (sectors_needed == 0) return;
 
     uint8_t *sec_buf = (uint8_t*) malloc(g_sector_size * sectors_needed);
     if (!sec_buf) return;
 
-    // 读取所有需要的扇区
+    // Read all needed sectors
     for (uint32_t i = 0; i < sectors_needed; i++) {
         esp_err_t err = msc_host_read_sector(g_msc_dev, start_sector + i, 
                                             sec_buf + (i * g_sector_size), g_sector_size);
@@ -987,7 +980,7 @@ static void handle_read_command(const uint8_t *cmd, uint8_t len)
         Serial.printf("[READ] Read sector %u successfully\n", start_sector + i);
     }
 
-    // 全 0 判断逻辑
+    // All-zero check logic
     bool all_zero = true;
     for (uint32_t i = 0; i < rd_len; ++i) {
         if (sec_buf[start_offset + i] != 0) {
@@ -998,16 +991,14 @@ static void handle_read_command(const uint8_t *cmd, uint8_t len)
     if (all_zero) {
         send_empty_frame(lba, offset, rd_len);
     } else {
-        // 直接发送请求的数据段（从 start_offset 开始，长度为 rd_len）
+        // Send requested data segment directly (starting from start_offset, length rd_len)
         send_readcontent_frame(lba, offset, rd_len, sec_buf + start_offset);
     }
 
     free(sec_buf);
 }
 
-// ------------------------------------------------------------
 // Write helpers
-// ------------------------------------------------------------
 static void send_writedone_frame(uint32_t lba, uint32_t offset, uint32_t wr_len, uint32_t status)
 {
     // payload: lba(4) + offset(4) + len(4) + status(4)
@@ -1123,8 +1114,6 @@ static void handle_write_command(const uint8_t *cmd, uint8_t total_len)
     send_writedone_frame(lba, offset, wr_len, 0);
 }
 
-
-//bby
 static void msc_task(void *args)
 {
     msc_host_device_handle_t msc_device = NULL;
@@ -1143,7 +1132,7 @@ static void msc_task(void *args)
             }
             dev_present = true;
 
-            // 1) 安装设备并挂载到 VFS
+            // 1) Install device and mount to VFS
             ESP_ERROR_CHECK(msc_host_install_device(msg.data.new_dev_address, &msc_device));
             g_msc_dev = msc_device;
             const esp_vfs_fat_mount_config_t mount_config = {
@@ -1153,13 +1142,13 @@ static void msc_task(void *args)
             };
             ESP_ERROR_CHECK(msc_host_vfs_register(msc_device, MNT_PATH, &mount_config, &vfs_handle));
 
-            // 2) 打印设备信息/描述符
+            // 2) Print device info/descriptors
             msc_host_device_info_t info;
             ESP_ERROR_CHECK(msc_host_get_device_info(msc_device, &info));
             msc_host_print_descriptors(msc_device);
             print_device_info(&info);
 
-            // 3) 列目录 + 4) 文件操作 + 5) 速度测试
+            // 3) List directory + 4) File operations + 5) Speed test
             ESP_LOGI(TAG, "ls command output:");
             struct dirent *d;
             DIR *dh = opendir(MNT_PATH);
@@ -1168,9 +1157,6 @@ static void msc_task(void *args)
                 printf("%s\n", d->d_name);
             }
             closedir(dh);
-
-            // bby file_operations();
-            // speed_test();
 
             ESP_LOGI(TAG, "Example finished, you can disconnect the USB flash drive");
         }
@@ -1189,13 +1175,13 @@ static void msc_task(void *args)
                 }
             }
             if (msg.id == APP_QUIT) {
-                // 触发 MSC driver 卸载；USB 库卸载由 usb_task 根据 NO_CLIENTS 事件完成
+                // Trigger MSC driver uninstall; USB library uninstall done by usb_task based on NO_CLIENTS event
                 ESP_ERROR_CHECK(msc_host_uninstall());
-                break;  // 跳出任务主循环，做收尾并结束任务
+                break;  // Exit task main loop, cleanup and end task
             }
         }
         if (msg.id == APP_COMMAND) {
-            // 解析来自上游的命令
+            // Parse commands from upstream
             if (msg.data.cmd.type == U_B2A_READ) {
                 handle_read_command(msg.data.cmd.data, msg.data.cmd.len);
             } else if (msg.data.cmd.type == U_B2A_WRITE) {
@@ -1208,17 +1194,14 @@ static void msc_task(void *args)
     vTaskDelete(NULL);
 }
 
-//bby
 static void uart_task(void *arg) {
     while (1) {
         uint8_t type, payload[256], len;
-        if (read_frame(type, payload, len, sizeof(payload))) { // ← 改1：不再取地址
-            // 添加打印消息
-            //Serial.printf("[UART] Received: type=0x%02X, len=%d\n", type, len);
+        if (read_frame(type, payload, len, sizeof(payload))) {
             app_message_t msg{};
-            msg.id = APP_COMMAND;                              // ← 改2：有这个枚举
-            msg.data.cmd.type = type;               // 记录命令类型
-            memcpy(msg.data.cmd.data, payload, len);           // ← 改3：使用 cmd 成员
+            msg.id = APP_COMMAND;
+            msg.data.cmd.type = type;
+            memcpy(msg.data.cmd.data, payload, len);
             msg.data.cmd.len = len;
             if (type == U_B2A_WRITE) {
                 Serial.printf("[UART] RX WRITE frame, len=%u\n", len);
@@ -1229,22 +1212,20 @@ static void uart_task(void *arg) {
     }
 }
 
-
-
 void app_main(void) {
   BaseType_t task_created;
   ESP_LOGI(TAG, "HID+MSC Host starting");
 
-  // (1) 启动 USB Host 库 & 事件循环（只此一次）
+  // (1) Start USB Host library & event loop (only once)
   task_created =
       xTaskCreatePinnedToCore(usb_lib_task, "usb_events", 4096,
                               xTaskGetCurrentTaskHandle(), 2, NULL, 0);
   assert(task_created == pdTRUE);
 
-  // 等待 usb_lib_task 完成安装
+  // Wait for usb_lib_task to complete installation
   ulTaskNotifyTake(pdFALSE, pdMS_TO_TICKS(1000));
 
-  // (2) 安装 HID Host（一次）并启动 HID 事件任务
+  // (2) Install HID Host (once) and start HID event task
   const hid_host_driver_config_t hid_host_driver_config = {
       .create_background_task = true,
       .task_priority = 5,
@@ -1259,15 +1240,15 @@ void app_main(void) {
   task_created = xTaskCreate(&hid_host_task, "hid_task", 4 * 1024, NULL, 2, NULL);
   assert(task_created == pdTRUE);
 
-  // (3) MSC 应用：创建队列、安装 MSC 驱动、创建 msc_task 与 uart_task
+  // (3) MSC application: create queue, install MSC driver, create msc_task and uart_task
   app_queue = xQueueCreate(5, sizeof(app_message_t));
   assert(app_queue);
 
-  // 只安装 MSC 驱动（由 usb_task 完成），不重复安装 usb_host
+  // Only install MSC driver (done by usb_task), don't reinstall usb_host
   task_created = xTaskCreate(usb_task, "usb_task", 4096, NULL, 2, NULL);
   assert(task_created == pdTRUE);
 
-  // BOOT 键中断：按下发 APP_QUIT
+  // BOOT button interrupt: send APP_QUIT when pressed
   const gpio_config_t input_pin = {
       .pin_bit_mask = BIT64(APP_QUIT_PIN),
       .mode = GPIO_MODE_INPUT,
@@ -1278,7 +1259,7 @@ void app_main(void) {
   ESP_ERROR_CHECK(gpio_install_isr_service(ESP_INTR_FLAG_LEVEL1));
   ESP_ERROR_CHECK(gpio_isr_handler_add(APP_QUIT_PIN, gpio_cb, NULL));
 
-  // 启动 MSC 应用任务与 UART 任务
+  // Start MSC application task and UART task
   task_created = xTaskCreate(msc_task, "msc_task", 5 * 1024, NULL, 3, NULL);
   assert(task_created == pdTRUE);
 
@@ -1288,10 +1269,8 @@ void app_main(void) {
   ESP_LOGI(TAG, "System init done. Waiting for devices...");
 }
 
-
-
 void setup() {
-  Serial.begin(460800);   // 你可以改回 115200；此处仅为调试效率
+  Serial.begin(460800);
   delay(200);
   uart2_init();
   Serial.println("ESP32-A: HID+MSC passthrough");
@@ -1299,7 +1278,7 @@ void setup() {
 }
 
 void loop() {
-  // 空；所有工作在 FreeRTOS 任务中
+  // Empty; all work done in FreeRTOS tasks
 }
 
 

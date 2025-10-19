@@ -1,0 +1,89 @@
+LTspice 24.1.9 for Windows
+Circuit: D:\C\1(1)\1\rece.net
+Start Time: Fri Oct 17 22:33:50 2025
+solver = Normal
+Maximum thread count: 32
+tnom = 27
+temp = 27
+method = trap
+D:\C\1(1)\1\rece.net(3): Limiting rise time to 2.5e-06.
+
+I2 N002 0 PULSE(0u 30u 1.2u 0n 0n 25u 50u 2) AC 1
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+D:\C\1(1)\1\rece.net(3): Limiting fall time to 2.5e-06.
+
+I2 N002 0 PULSE(0u 30u 1.2u 0n 0n 25u 50u 2) AC 1
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Direct Newton iteration failed to find .op point.  (Use ".option noopiter" to skip.)
+Starting Gmin stepping
+Gmin = 10
+Gmin = 1.07374
+Gmin = 0.115292
+vernier = 0.5
+vernier = 0.25
+Gmin = 0.0335813
+vernier = 0.125
+vernier = 0.166667
+Gmin = 0.0254736
+vernier = 0.222222
+vernier = 0.296296
+Gmin = 0.0151699
+vernier = 0.395061
+Gmin = 0.00662656
+vernier = 0.526748
+vernier = 0.702331
+Gmin = 0.00176712
+vernier = 0.936441
+vernier = 1
+Gmin = 0.000246304
+Gmin = 2.64467e-05
+Gmin = 2.8397e-06
+Gmin = 3.0491e-07
+Gmin = 3.27395e-08
+Gmin = 3.51537e-09
+Gmin = 3.7746e-10
+Gmin = 4.05295e-11
+Gmin = 4.35182e-12
+vernier = 0.5
+Gmin = 9.01376e-13
+vernier = 0.25
+vernier = 0.333333
+vernier = 0.166667
+vernier = 0.0833333
+Gmin = 7.48883e-13
+vernier = 0.111111
+vernier = 0.0555555
+Gmin = 6.4814e-13
+vernier = 0.0277778
+vernier = 0.0138889
+Gmin = 6.36973e-13
+vernier = 0.0185185
+vernier = 0.00925925
+vernier = 0.00462963
+vernier = 0.00231481
+Gmin = 6.30386e-13
+vernier = 0.00308642
+vernier = 0.00411522
+Gmin = 6.25744e-13
+vernier = 0.00548696
+vernier = 0.00274348
+Gmin = 6.1998e-13
+vernier = 0.00137174
+Gmin = 6.17646e-13
+vernier = 0.00182899
+vernier = 0.000914493
+vernier = 0.000457247
+Gmin = 6.16659e-13
+Gmin = 0
+Gmin stepping succeeded in finding the operating point.
+
+Changing Tseed to 9.76562e-12
+Total elapsed time: 0.479 seconds.
+
+Files loaded:
+D:\C\1(1)\1\rece.net
+D:\C\1(1)\1\opa855_a.lib
+D:\C\1(1)\1\MAX40026.txt
+D:\C\1\lm358.lib
+C:\Users\zhe\AppData\Local\LTspice\lib\sub\LTC.lib
+

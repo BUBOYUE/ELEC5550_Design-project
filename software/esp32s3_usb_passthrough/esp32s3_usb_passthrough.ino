@@ -1296,9 +1296,9 @@ void setup() {
       g_appmain_started = true;
       app_main();
     }
-    // 注意：后续逻辑在 app_main() 创建的任务里跑；loop() 留空即可
+    // Note: subsequent logic runs in tasks created by app_main(); loop() remains empty
   } else {
-    // ---------- Device (HID/MSC) 分支 ----------
+    // ---------- Device (HID/MSC) branch ----------
     Serial.println("USB Device mode (HID/MSC) selected by GPIO5=LOW");
     device_usb_init();
     g_device_inited = true;
@@ -1308,14 +1308,14 @@ void setup() {
 
 void loop() {
   if (g_run_host) {
-    // Host/passthrough 模式：所有工作在线程里，loop 留空避免误触发
-    // 也可适当让出 CPU：
+    // Host/passthrough mode: all work runs in threads, keep loop() empty to avoid interference
+    // Yield CPU time appropriately:
     vTaskDelay(pdMS_TO_TICKS(10));
     return;
   }
 
-  // 设备模式：保持你原有的逻辑
-  // 未就绪或者模式为 NONE -> 重新初始化
+  // Device mode: maintain original logic
+  // Not ready or mode is NONE -> reinitialize
   if (!g_usb_ready || g_Mode == NONE) {
     if (!g_device_inited || !g_usb_ready) {
       device_usb_init();
@@ -1325,15 +1325,15 @@ void loop() {
     return;
   }
 
-  // HID 模式：串口 -> HID 转发
+  // HID mode: UART -> HID forwarding
   if (g_Mode == HID) {
     device_mouse_and_keyboard();
-    // 函数内部通常会阻塞/轮询；这里不额外延时
+    // Function internally blocks/polls; no additional delay needed here
   }
-  // MSC 模式：电脑通过回调驱动，无需主动干预；仅监测是否需要重新初始化
+  // MSC mode: PC drives through callbacks, no active intervention needed; only monitor if reinitialization is needed
   else if (g_Mode == USTICK) {
     if (check_reinit_needed()) {
-      Close_Ustick();   // 触发设备侧清理，下一轮会走初始化分支
+      Close_Ustick();   // Trigger device-side cleanup, next iteration will go to initialization branch
     }
     vTaskDelay(pdMS_TO_TICKS(1));
   }

@@ -98,10 +98,10 @@ The host board (ESP32-A) acts as a USB Host, while the device board (ESP32-B) em
 ## 🧠 Contributors
 - **Boyue BU** – Software (Host-side, USB HID/MSC RTOS structure)
 - **Elyney OU** – Software (Device-side, TinyUSB HID/MSC logic)
-- **Kunze CHEN** – Software (UART Communication Protocol)
+- **Kunze CHEN** – Software (UART Communication Protocol, Error Correction)
 - **Zhanjun XU** – Hardware (Laser Driver Design & PCB design)
-- **Zhe WANG** – Hardware (Receiver Design & System Testing)
-- **Bowen LIU** – Hardware (Receiver Design & System Testing)
+- **Zhe WANG** – Hardware (Receiver Design & PCB design)
+- **Bowen LIU** – Hardware (Receiver Design & PCB design)
 
 ---
 

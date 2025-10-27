@@ -1,9 +1,13 @@
 ## Version Information
 
-- **Version:** 3.0 (Final Release)
-- **Date:** 2025-10-19
+- **Version:** 3.1 (Final Release)
+- **Date:** 2025-10-27
 - **Editor:** Boyue BU
 - **Description:**
+  - Fixed unstable recognition issues for different mouse types.
+  - Added support for recognizing different signaling variants of mouse/keyboard (Report/Boot protocol, Report ID handling).
+  - Mouse, keyboard, and U‑Disk functionalities are now complete.
+  - Adjusted documentation to reflect the new HID compatibility improvements.
   - Completed the final version of the project (software, hardware, and documentation updated).
   - Added compatibility note for **ESP32-S3 DevKitC V1**, allowing firmware testing without the custom PCB.
   - Improved **Host/Device** dual communication protocol and FEC verification mechanism.
@@ -113,6 +117,7 @@ The host board (ESP32-A) acts as a USB Host, while the device board (ESP32-B) em
 - [CRC Algorithms Reference (Boost.CRC library, C++)](https://www.boost.org/doc/libs/release/libs/crc/crc.html)
 - [ESP-IDF USB Host HID Example](https://github.com/espressif/esp-idf/tree/master/examples/peripherals/usb/host/hid)
 - [ESP-IDF USB Host MSC Example](https://github.com/espressif/esp-idf/tree/master/examples/peripherals/usb/host/msc)
+- [HID Report Parser](https://github.com/pasztorpisti/hid-report-parser)
 ---
 
 

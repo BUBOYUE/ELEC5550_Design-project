@@ -56,6 +56,7 @@ using FEC_RS = RS::ReedSolomon<239, 16>;  // RS(255,239): 16 bytes redundancy, c
 
 void uart2_init() {
   Serial2.begin(BAUD, SERIAL_8N1, PIN_RX, PIN_TX);
+  Serial.printf("UART2 initialized with baud rate: %d\n", BAUD);  // Print BAUD value
   delay(50);  // Hardware stabilization
 }
 

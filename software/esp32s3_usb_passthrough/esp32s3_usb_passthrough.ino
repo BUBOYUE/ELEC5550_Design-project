@@ -70,7 +70,6 @@
 
 #include "device.h" // Declares device_usb_init / device_mouse_and_keyboard / Close_Ustick etc.
 
-// 新增：引入 HID 报告解析库
 #include "hid_report_parser.h"
 
 /**
@@ -111,7 +110,6 @@ static void mouse_parser_init(hid_host_device_handle_t hid_device_handle) {
     return;
   }
 
-  // 严格匹配 Mouse 集合，失败后宽松模式
   hid::Collection* root = g_mouse_ctx.cfg.Init(&g_mouse_ctx.buttons, &g_mouse_ctx.axes, false);
   int r = g_mouse_ctx.parser.Init(root, (const void*)desc_ptr, desc_len);
   if (r != hid::ERR_SUCCESS) {
@@ -454,12 +452,12 @@ static void hid_host_keyboard_report_callback(const uint8_t *const data,
  */
 static void hid_host_mouse_report_callback(const uint8_t *const data,
                                            const int length){
-  // 优先尝试：使用 Report Descriptor 解析
+  // Prefer to parse using Report Descriptor first
   bool sent = false;
   if (g_mouse_ctx.inited && data && length > 0) {
     int pr = g_mouse_ctx.parser.Parse(data, (size_t)length);
     if (pr == hid::ERR_SUCCESS) {
-      // 采集按钮（最多 5 个：左、右、中、后退、前进）
+      // Collect buttons (up to 5: left, right, middle, back, forward)
       uint8_t buttons = 0;
       buttons |= (g_mouse_ctx.buttons[hid::MouseConfig::BTN_LEFT]   ? 0x01 : 0);
       buttons |= (g_mouse_ctx.buttons[hid::MouseConfig::BTN_RIGHT]  ? 0x02 : 0);
@@ -467,12 +465,12 @@ static void hid_host_mouse_report_callback(const uint8_t *const data,
       buttons |= (g_mouse_ctx.buttons[hid::MouseConfig::BTN_BACK]   ? 0x08 : 0);
       buttons |= (g_mouse_ctx.buttons[hid::MouseConfig::BTN_FORWARD]? 0x10 : 0);
 
-      // 采集相对轴：X/Y 与滚轮
+      // Collect relative axes: X/Y and wheel
       int32_t dx32 = g_mouse_ctx.axes[hid::MouseConfig::X];
       int32_t dy32 = g_mouse_ctx.axes[hid::MouseConfig::Y];
       int32_t wh32 = g_mouse_ctx.axes[hid::MouseConfig::V_SCROLL];
 
-      // 饱和到 int8
+      // Saturate to int8
       auto sat8 = [](int32_t v)->int8_t {
         if (v > 127) return 127;
         if (v < -128) return -128;
@@ -482,7 +480,7 @@ static void hid_host_mouse_report_callback(const uint8_t *const data,
       int8_t dy = sat8(dy32);
       int8_t wheel = sat8(wh32);
 
-      // 发送 4 字节载荷：[buttons, dx, dy, wheel]
+      // Send 4-byte payload: [buttons, dx, dy, wheel]
       uint8_t payload[4];
       payload[0] = buttons;
       payload[1] = (uint8_t)dx;
@@ -491,7 +489,7 @@ static void hid_host_mouse_report_callback(const uint8_t *const data,
       send_frame(0x01, payload, 4);
       sent = true;
 
-      // Debug 输出
+      // Debug output
       hid_print_new_device_report_header(HID_PROTOCOL_MOUSE);
       printf("X:%06d\tY:%06d\tW:%4d\t|%c|%c|%c|\r \n",
              (int)dx, (int)dy, (int)wheel,
@@ -505,7 +503,7 @@ static void hid_host_mouse_report_callback(const uint8_t *const data,
 
   if (sent) return;
 
-  // 回退：原有启发式处理，兼容未能解析的情况
+  // Fallback: original heuristic processing, compatible with unparsed cases
   // DEBUG: dump raw mouse report as signed decimal (int8)
   printf("[DBG][MOUSE] size=%d s8:", length);
   for (int i = 0; i < length; ++i) printf(" %4d", (int)((int8_t)data[i]));
@@ -627,7 +625,7 @@ void hid_host_interface_callback(hid_host_device_handle_t hid_device_handle,
   case HID_HOST_INTERFACE_EVENT_DISCONNECTED:
     ESP_LOGI(TAG, "HID Device, protocol '%s' DISCONNECTED",
              hid_proto_name_str[dev_params.proto]);
-    // 鼠标断开时重置解析器
+    // Reset parser when mouse is disconnected
     if (HID_PROTOCOL_MOUSE == dev_params.proto) {
       mouse_parser_reset();
     }
@@ -673,7 +671,7 @@ void hid_host_device_event(hid_host_device_handle_t hid_device_handle,
       }
     }
     ESP_ERROR_CHECK(hid_host_device_start(hid_device_handle));
-    // 鼠标连接后初始化解析器
+    // Mouse parser init
     if (HID_PROTOCOL_MOUSE == dev_params.proto) {
       mouse_parser_init(hid_device_handle);
     }
